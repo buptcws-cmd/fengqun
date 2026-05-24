@@ -1,0 +1,7 @@
+interface:
+  display_name: "Series Task Workflow"
+  short_description: "Coordinate series tasks as reviewable checkpoints"
+  default_prompt: "Use $series-task-workflow to run this series as small, validated checkpoints."
+
+policy:
+  allow_implicit_invocation: true

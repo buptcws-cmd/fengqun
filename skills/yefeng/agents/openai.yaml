@@ -1,0 +1,4 @@
+interface:
+  display_name: "Yefeng"
+  short_description: "Turn big visions into governed, authorized series plans"
+  default_prompt: "Use $yefeng to turn my rough project idea into a governed, authorization-aware, parallel-ready series proposal system."

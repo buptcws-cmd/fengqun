@@ -1,0 +1,219 @@
+---
+name: series-task-workflow
+description: Coordinate user-provided multi-step or multi-module task series with a shared NEXT_STEPS-style registry, coordinator/worker subagent dispatch, AGENTS handoff instructions, per-task worktrees, proposals, validation, review, merge, cleanup, and optional continuation. Use when the user explicitly says "系列提案", asks to process a series, batch, roadmap, audit set, or "one by one" repair flow; when they want several conversations/agents/subagents to claim tasks independently or in parallel; when they say to create worktrees/proposals for related issues; or when they ask to continue a previously agreed series workflow. Do not use for a standalone report or one-off task unless the user asks to turn it into a series.
+---
+
+# Series Task Workflow
+
+## Purpose
+
+Use this skill to turn a large task set into small, independently claimable checkpoints. The default shape is: create or read the shared registry, claim one unblocked task, work in a dedicated worktree, validate and review it, merge it back, update the registry, then release or claim the next genuinely unblocked task.
+
+When the user wants ongoing series execution and subagents are available, prefer a coordinator/worker shape: the main agent coordinates the registry, dependency graph, dispatch, review, merge and cleanup; worker subagents claim and implement individual runnable checkpoints in disjoint task worktrees. The coordinator must not silently become a worker for an already claimed checkpoint.
+
+## Intake
+
+1. Classify the request.
+   - If it is a standalone review, bug report, or feature request, handle it as a normal task. Do not register it in a persistent roadmap unless the user explicitly asks.
+   - If it is a batch, roadmap, module series, audit suite, "系列提案", or "逐个修复" request, use this workflow.
+2. Read the local authority for the target repo before changing files: root instructions, project context, OpenSpec rules for proposal/spec work, and any user-named guide.
+   - If the repo defines an authorization policy with modes such as `AUTO`, `SCOPED`, `AGENT_REVIEW`, or `ASK`, that policy is the approval source of truth. Generic references to user approval mean the repo's configured approval gate, not necessarily a direct user question.
+3. Check current git status and active worktrees. Preserve unrelated changes and avoid taking over another active task unless the user names it and grants authority.
+4. Choose the coordination surface deliberately.
+   - Use a user-named plan file when provided.
+   - For a multi-conversation series, default to a repo-root `NEXT_STEPS.md` unless the repo already has a named equivalent.
+   - Use an existing repo roadmap only when it is already the active series board for this exact series.
+   - For a single standalone report, prefer a proposal file, issue-style summary, or normal implementation branch over adding rows to a shared `NEXT_STEPS.md`.
+5. For a cross-conversation or coordinator/worker series, add or update the repo handoff hook, usually in `AGENTS.md`, telling future agents to read the series registry before claiming work.
+6. If the user asked to keep a series moving, decide explicitly whether this main agent is acting as coordinator, as a worker claimant, or both for one specific unblocked checkpoint. Do not let that role be implicit.
+
+## Shared Registry
+
+For cross-conversation series work, maintain a registry on the main branch or equivalent coordination branch. Prefer `NEXT_STEPS.md` unless the user names another file.
+
+Treat the registry as the active coordination surface, not as the permanent archive for every completed series. Historical details should be recoverable from git history, PRs, archived OpenSpec changes, review artifacts, or user-named archives, not by accumulating old completed roadmaps inside the active `NEXT_STEPS.md`. The normal time to handle cleanup is series closeout: after the final task is merged, abandoned, or otherwise closed, remind the user that the active registry can be cleared, archived, deleted, or reset, and follow their decision.
+
+The registry should record:
+
+- series goal and non-goals;
+- task ids, titles, and statuses;
+- claim lease metadata when claimed;
+- branch and worktree paths;
+- OpenSpec change id or proposal boundary;
+- execution graph, including serial boundaries and safe parallel groups;
+- dependencies and blocked tasks;
+- shared write surfaces;
+- validation and manual product-path evidence;
+- review gate and latest verdict;
+- merge and cleanup status;
+- claimant-only next action and non-claimant/coordinator next action.
+
+Use compact statuses such as `unclaimed`, `claimed`, `blocked`, `proposal`, `proposal-review`, `approved`, `implementation`, `implementation-review`, `done`, and `merged`. Keep meanings explicit in the registry if the repo needs different names.
+
+`done` means the worktree task passed its local validation/review. `merged` means it has been integrated back to the main branch and the registry has been updated. Do not treat `done` as merged.
+
+Treat claims as soft leases, not ownership. A claim lease records who is actively holding a checkpoint and how to find the work; it does not give permanent ownership of the task and it must not be auto-released just because a timestamp passed. Prefer a registry column named `Claim` instead of `Owner` or `Owner / Conversation`. If an existing registry already has an owner/conversation column, interpret it as the claim lease field until the registry can be safely renamed. The claim value must be stable and absolute, such as `claim: codex-20260520-1210-t1-preflight; since 2026-05-20T12:10+0800; last_seen=2026-05-20T13:00+0800; lease_expires=2026-05-20T17:00+0800`. For coordinator-dispatched workers, include both a worker token and parent coordinator token, such as `claim: codex-20260520-1430-t2-ai-guidance/worker-a; parent=codex-20260520-1425-series-coordinator; since 2026-05-20T14:30+0800`. If no platform-provided thread or agent id is available, generate a local unique token like `codex-YYYYMMDD-HHMM-<task-slug>`.
+
+Do not write relative claim identities such as `current conversation`, `Current Codex conversation`, `this agent`, `me`, `active Codex`, or `当前会话`. They are ambiguous in future conversations. Any non-empty claim lease means the task is already held unless the registry explicitly marks it released, the user authorizes takeover, or the registry defines and satisfies a stale-lease rule. A stale lease should first become a stale candidate; takeover should require checking recent progress evidence, handoffs, commits, heartbeats, and repo authorization.
+
+When creating a new `NEXT_STEPS.md` or equivalent registry, do not treat the series as a flat backlog. Map the task dependency graph first: mark which checkpoints must be serial, which can safely run in parallel, which decisions or contracts are prerequisites, and which shared write surfaces make parallel work unsafe. A task should be parallel-eligible only when its upstream assumptions are stable and its declared write surfaces will not collide with another active task.
+
+Generated registries must distinguish the next action for the current claimant from the next action for any other agent. Prefer separate columns named `Claimant Next Action` and `Non-Claimant / Coordinator Action`. If an existing table has only `Next Safe Action`, every active-claim row must explicitly prefix the text with `Claimant-only:` and also state `Non-claimants: do not enter the worktree; report blocked unless takeover/release is explicit.` Never write a claimed task's implementation step as an unqualified global next action.
+
+Keep registry-wide non-goals compatible with task write surfaces. Do not write a broad non-goal such as "do not edit docs" when a later task explicitly owns a docs path. If a setup or fixture instruction says "only create NEXT_STEPS.md" for registry scaffolding, record that as a scaffolding constraint or test-harness note, not as a permanent series non-goal that blocks future workers. Series non-goals should forbid out-of-scope surfaces while each task row lists the surfaces that its claimant may edit.
+
+## Claim Protocol
+
+Only claim work that is `unclaimed` and has no active claim lease, or work that is explicitly released by the user/current claimant. Do not take over another active task unless the user authorizes it, the claimant released it, or the registry marks the claim stale and the repo rules allow takeover.
+
+An active claim is a hard execution boundary for non-claimants. A non-claimant must not enter the claimed task worktree, run validation there, start dev servers, create review artifacts, run governance write-index commands, stage/commit, merge, cleanup, or edit files inside that task. The safe non-claimant actions are to read the registry, inspect main-branch coordination facts when needed, report the blocker, ask for takeover authorization, or wait/heartbeat if the workflow explicitly calls for idle intake.
+
+The exception is an explicitly dispatched reviewer for a review gate. A reviewer may enter the claimed task worktree only when the coordinator or current claimant names the task, worktree, review scope, and allowed review artifact path. The reviewer must keep implementation files read-only, may write only the authorized review artifact or explicitly authorized verdict field, and must not implement, run unrelated validation, stage, commit, merge, release, or clean the task.
+
+When claiming a task, update the registry before implementation with:
+
+- stable claim token and absolute claim time;
+- `last_seen`, `lease_expires`, and any heartbeat/waiting status when the repo uses leases;
+- intended branch/worktree;
+- scope and non-goals;
+- write surfaces;
+- proposal and approval requirements;
+- planned validation and review evidence.
+
+Claim the smallest coherent checkpoint. Do not reserve the whole roadmap unless tasks are inseparable or the user explicitly asks this conversation to own the whole series.
+
+Refresh a claim lease at natural progress points: claiming, starting or resuming active work, dispatching or receiving a worker/reviewer result, before and after long commands, writing a handoff, changing blockers, or entering waiting heartbeat. Do not run a heartbeat solely to renew a lease while the same thread is actively executing; use a longer active lease instead.
+
+## Coordinator Mode
+
+Use coordinator mode when the user asks to continue a series and subagents can safely own worker checkpoints. Coordinator mode is especially useful when several unblocked tasks can run in parallel.
+
+Coordinator responsibilities:
+
+- read the local authority and registry before dispatch;
+- decide which checkpoints are runnable, blocked, claimant-only, or safe to parallelize;
+- avoid claiming worker tasks for the main agent unless the main agent will actually implement that one task;
+- create or select one dedicated worktree per worker task before product-file edits;
+- update the registry with the worker claim, branch/worktree, scope, write surfaces, validation plan, review gate, claimant-only next action, and non-claimant/coordinator action before dispatch;
+- give each worker a bounded prompt naming its task id, allowed write surfaces, forbidden surfaces, branch/worktree, validation requirements, and whether it may commit;
+- keep worker write sets disjoint unless the registry declares a serial boundary and the upstream worker has released or merged;
+- use reviewer subagents as review gates when required, but keep the coordinator responsible for remediation decisions and closure;
+- integrate returned worker results by inspecting diffs and evidence, then update only stable registry facts;
+- perform commit, merge, release, and cleanup only when the repo/user rules authorize closeout.
+
+Worker responsibilities:
+
+- read the registry and claim lease assigned to them;
+- claim or confirm their assigned registry row before implementation, using a stable token, branch/worktree, scope, write surfaces, validation plan, and review gate;
+- stay inside the assigned worktree and declared write surfaces;
+- update their own task-local registry facts as work progresses, including status, evidence, blockers, and minimal review conclusions;
+- move their own task to `done` only after required validation is recorded and the latest required review explicitly says `review passed`;
+- do not edit unrelated registry rows, merge to main, mark `merged`, release shared claims, or clean shared branches unless explicitly authorized;
+- return changed files, validation evidence, manual-test evidence or accepted gaps, review status, blockers, and residual risk.
+
+If no task is runnable because every candidate is blocked by active claims, dependencies, approval gates, or shared write surfaces, the coordinator reports the blocker or uses the Idle Heartbeat rules. It must not enter another worker's active task to "help" unless takeover is explicit.
+
+## Proposal Approval Gate
+
+Proposal creation and proposal implementation are separate checkpoints unless the user explicitly approved both in advance. A proposal worker may draft proposal/spec/tasks docs, run proposal validation, and obtain proposal review. After the latest proposal review explicitly says `review passed`, the proposal worker must stop before implementation and return the proposal purpose, execution approach, expected benefit, validation evidence, minimal review conclusion, and any risks to the coordinator.
+
+The coordinator is the only role that satisfies the repo approval gate for implementation. If the repo authority says the gate is `ASK`, the coordinator must summarize the proposal for the user and wait for explicit approval before dispatching an implementation worker or marking the registry status `approved`. If the repo authority says the gate is `AGENT_REVIEW`, an independent reviewer pass plus the required registry evidence can satisfy approval without another user question. A proposal review pass, validation pass, or worker confidence is not approval unless the local authority explicitly says it is.
+
+Registries must make this gate visible:
+
+- before proposal review passes, claimant next action is proposal validation/review and coordinator action is track proposal progress;
+- after proposal review passes but before the repo approval gate is satisfied, status should be `proposal-review`, `blocked`, or an explicit waiting-for-approval equivalent, not `approved`;
+- claimant next action should say `wait for coordinator/repo approval gate`;
+- non-claimant/coordinator action should say `satisfy the repo approval gate: user approval for ASK, minimal review conclusion for AGENT_REVIEW`;
+- only after the repo approval gate is satisfied may the coordinator update status to `approved`, record the approval fact/date, and dispatch implementation.
+
+If a worker is asked to implement a proposal and the registry does not record the required repo approval evidence, the worker must stop and report the approval blocker instead of editing implementation surfaces.
+
+## Checkpoint Planning
+
+For the selected series, create or select the smallest coherent checkpoint that can be validated and merged independently.
+
+Record, at least in the conversation or the selected coordination surface:
+
+- checkpoint name and scope;
+- prerequisite tasks, downstream dependents, and blocked tasks;
+- serial boundaries, safe parallel groups, and shared write surface conflicts;
+- expected branch/worktree, when file edits are needed;
+- proposal vs implementation boundary;
+- validation and manual product-path evidence expected;
+- review gate, repo approval gate, and cleanup rule.
+
+Prefer one checkpoint over reserving an entire roadmap. Claim later tasks only when they are inseparable for correctness or the user explicitly asks one conversation to own the whole series.
+
+## Worktree Protocol
+
+For file-changing tasks in a shared series, use a dedicated branch and worktree unless the repo explicitly forbids worktrees or the user asks for a single working tree.
+
+- Name branches predictably, such as `codex/<task-id>-short-title`.
+- Record the branch and worktree in the registry.
+- For coordinator-dispatched work, record the parent coordinator token and the worker token in the claim or notes.
+- Keep writes inside the claimed task's declared surfaces.
+- Do not edit another task's worktree or revert changes from other conversations.
+- If the task only updates the registry itself, work on the main coordination branch when repo rules allow it.
+
+## Execution
+
+1. Before entering any task worktree, confirm whether its `Claim` belongs to this agent/subagent. If not, stop normal execution for that task and follow the non-claimant/coordinator action.
+2. Create or switch to the correct dedicated worktree before task file edits when the series registry or repo rules require it.
+3. Before claiming or dispatching parallel work, check the dependency graph, serial boundaries, safe parallel groups, and shared write surfaces. Do not parallelize tasks when an unfinished prerequisite could change their assumptions or when active tasks would compete for the same contract, schema, module, or registry surface.
+4. For architecture, security, contract, large UX, or cross-module work, create an OpenSpec proposal first when the repo uses OpenSpec. Do not implement before the proposal is reviewed and the repo approval gate is satisfied.
+5. Keep edits scoped to the checkpoint. Do not refactor unrelated surfaces or rewrite active work from other conversations.
+6. Keep the registry current when scope, blockers, evidence, branch/worktree, dependency order, or review state changes. Do not wait until the end to record meaningful coordination facts.
+7. Validate with commands and manual product-path checks appropriate to the changed behavior. Treat tests and linters as evidence, not a substitute for required review.
+8. If review is required, obtain a post-repair review that explicitly passes before calling the checkpoint `done`.
+9. When authorized to close out, commit, merge, update only stable coordination facts, remove disposable worktrees/branches/artifacts, mark the task `merged`, and then reassess the next unblocked checkpoint.
+
+## Completion And Cleanup
+
+Before marking a task `done`, record:
+
+- changed proposal/code/docs surfaces;
+- validation commands and results;
+- manual product-path evidence or accepted gaps;
+- minimal review conclusion and residual risks. A durable review conclusion should name reviewer identity, reviewed scope, verdict, required fixes, re-review status, and unlock/block effect; full review transcripts are process material unless the repo explicitly requires retaining them.
+
+Before marking it `merged`, record:
+
+- merge commit or PR reference when available;
+- final branch/worktree cleanup state;
+- downstream tasks unblocked or still blocked.
+
+If a task is blocked, mark it `blocked`, state the blocker, and write the next concrete action. Do not leave a claimed task silently idle.
+
+When the whole series is complete, explicitly remind the user that the corresponding active registry is no longer needed for coordination and ask how they want it handled. Offer sensible choices: clear/reset a fixed root file such as `NEXT_STEPS.md`, delete a dedicated registry file, move it to an agreed archive location, or intentionally keep it if the user wants an in-file archive. Do not silently leave completed task rows, closeout summaries, or historical task tables in the active registry as the default. Once the user chooses cleanup, carry it out during closeout and record stable history in commits, PRs, archived OpenSpec changes, review artifacts, or user-named archives rather than copying completed series content forward.
+
+## Continuation
+
+Continue automatically while the user has asked for series execution until the series is complete, the user cancels continuation, or a hard blocker requires a user decision. A series is complete only when the registry marks all relevant checkpoints as `merged`, `abandoned`, or an explicit closed/completed equivalent.
+
+Stop normal task execution and report the blocker when:
+
+- a prerequisite is unmet;
+- another active worktree owns the needed surface;
+- proposal approval is required;
+- real credentials, production access, or irreversible behavior needs confirmation;
+- no safe unclaimed checkpoint exists for this coordinator/worker role;
+
+## Idle Heartbeat
+
+For an open series, maintain one thread heartbeat at the cadence required by local authority, or 15 minutes by default, only while all of these are true:
+
+- this conversation has no runnable claimed task;
+- no safe unclaimed checkpoint exists;
+- no local validation, review, merge, cleanup, or other task execution is currently in progress in this conversation;
+- the user has asked for continued series execution or the repo guide explicitly calls for idle intake.
+
+If a runnable task appears, or this conversation has a claimed task that can continue, stop the heartbeat before claiming or continuing work. If the registry shows the series is complete, or the user cancels continuation, stop the heartbeat permanently and do not recreate it.
+
+Before creating a heartbeat, check whether one already exists for the same series when the environment supports automation inspection. Update the existing heartbeat instead of creating a duplicate. If heartbeat automation is unavailable, report the idle state and stop; do not emulate it with shell loops.
+
+Heartbeat wakeups must be quiet and registry-driven: reread the local authority and series registry, obey claim leases, refresh waiting leases when appropriate, continue only newly runnable work, and avoid file edits or long reports when nothing changed. Never park a shell `sleep`, `while`, or other long-running process to keep a series alive.
+
+## User-Facing Closeout
+
+For each checkpoint, report the purpose, what changed or was proposed, validation evidence, minimal review conclusion, merge/cleanup state, and the next gated decision. Keep the report brief enough that the user can approve or redirect without reading a second audit log.
