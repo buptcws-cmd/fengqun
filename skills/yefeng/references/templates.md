@@ -65,9 +65,11 @@ Use these templates only when the project lacks equivalent local docs. 野蜂 do
 
 只有当提示明确写了 `read-only`、`dry-run`、`no launch`、`do not start/resume/merge`，或授权/证据/并行度/冲突确实阻塞时，才只读汇报。
 
-`docs/总控状态快照.md` 中的“下一步待执行队列”不是建议列表。若没有更高优先级的 run 处理、outbox 路由、阻塞裁决、恢复或合并工作消耗本轮，总控必须执行队列第一项安全动作；如果不能执行，必须写清 `blocked_by`、`resume_when`、`required_evidence` 和 `wake_target`。
+`docs/总控状态快照.md` 中的“下一步待执行队列”不是建议列表。一次总控轮次是排空循环，不是单动作 tick。每次处理完成 run、导入 outbox、裁决阻塞、恢复、启动、合并、刷新基线或提交稳定治理事实后，都必须重新读取权威状态并继续执行下一项已授权、未阻塞、容量允许的动作，直到进入真正空闲。
 
-总控心跳是长期保活机制。没有运行角色、没有待执行队列、当前 checkpoint 全部完成，只能得到 `IDLE_OK`，不能因此删除、暂停或关闭心跳。只有用户明确要求停止/暂停/删除/归档/结束野蜂总控循环，或经用户批准的授权策略要求停机时，才可停止心跳。空跑时报告已检查的事实和下一次唤醒条件，并保持现有 cadence。
+若没有更高优先级的 run 处理、outbox 路由、阻塞裁决、恢复或合并工作消耗当前循环，总控必须执行队列中所有当前安全且容量允许的动作，而不是只执行第一项后等待下一次心跳；如果不能执行，必须写清 `blocked_by`、`resume_when`、`required_evidence` 和 `wake_target`。
+
+总控心跳是长期保活机制。心跳间隔只是唤醒间隔，不是工作批次边界；20 分钟等待应该发生在排空所有能做的事之后。没有运行角色、没有待执行队列、当前 checkpoint 全部完成，只能得到 `IDLE_OK`，不能因此删除、暂停或关闭心跳。只有用户明确要求停止/暂停/删除/归档/结束野蜂总控循环，或经用户批准的授权策略要求停机时，才可停止心跳。空跑时报告已检查的事实和下一次唤醒条件，并保持现有 cadence。
 
 ## 8. 阻塞处理
 
@@ -662,7 +664,7 @@ safe_same_role_work_available:
 ```text
 作为野蜂总控线程，检查后台角色会话、通信总线、阻塞条件、交接报告、reviewer 证据和 merge-ready 分支。
 
-这是执行轮次，不是只读巡检。除非用户明确说 read-only/dry-run/no launch/do not start/resume/merge，否则检查后必须执行当前已授权、未阻塞、容量允许的第一项控制动作。
+这是执行轮次，不是只读巡检。除非用户明确说 read-only/dry-run/no launch/do not start/resume/merge，否则检查后必须进入排空循环：执行当前已授权、未阻塞、容量允许的控制动作；每完成一项就重新计算队列并继续，直到没有可执行动作、容量被运行角色占满、需要用户决策，或出现明确阻塞。
 
 请执行：
 1. 处理已完成 run；
@@ -672,14 +674,14 @@ safe_same_role_work_available:
 5. 对 READY_TO_RESUME 角色，先更新其 worktree 基线，再从该 worktree 目录使用 session_id 恢复；
 6. 对 MERGE_READY 角色检查 reviewer/验证证据，排除 `.yefeng/assignment.json` 和 `.yefeng/outbox/**` 后集成；
 7. 集成后写 BASELINE_UPDATED 事件并唤醒受影响角色；
-8. 如果本轮没有更高优先级工作消耗执行机会，读取状态快照/任务登记中的下一步待执行队列，选择第一项安全动作并执行：分配、启动、恢复、集成，或写出具体阻塞；
-9. 刷新 docs/总控状态快照.md，只把仍未满足条件或容量不足的项目留在队列中；
+8. 如果本轮没有更高优先级工作消耗当前循环，读取状态快照/任务登记中的下一步待执行队列，执行所有当前安全且容量允许的动作：分配、启动、恢复、集成，或写出具体阻塞；
+9. 每次状态变化后重新进入步骤 1；刷新 docs/总控状态快照.md 时，只把仍未满足条件、容量不足、依赖运行中角色、需要 ASK 或因时间预算明确延后的项目留在队列中；
 10. 更新治理 JSON 时使用可重跑的属性更新方式；PowerShell 中不要假设 `ConvertFrom-Json` 后的对象能直接赋不存在的属性，必要时用 `[ordered]` hashtable 或 `Add-Member -Force`；
 11. 生成 Markdown 治理视图时，避免双引号 here-string 吃掉反引号或 `$()`；优先用单引号 here-string + `__PLACEHOLDER__` 替换，并读回检查没有 `__PLACEHOLDER__`、`$sessionId`、`$roleCommit`、`$(` 等残留；
 12. 将稳定治理事实提交到版本库：`.yefeng/state/**`、`.yefeng/events.jsonl`、任务登记、角色分配、通信路由、总控指令、交接摘要和状态快照。只有项目策略明确不版本化这些文件，或存在具体冲突/授权阻塞时，才可保留未提交，并必须写出 blocker；
 13. 运行 `git diff --check` 和 `git status --short` 验证项目集成面干净；若只有被刻意 gitignore 的运行运输文件可忽略，若稳定治理文件仍脏则本轮不能报告完整通过；
 14. 若没有任何可执行工作，报告 `IDLE_OK`，说明已检查 running roles、outbox、merge-ready、ready-to-resume、active directives、dirty governance，并保持总控心跳 active；
-15. 汇报本轮实际执行的动作、仍阻塞的问题、提交/合并 commit、工作区是否干净、心跳仍 active 和下一次触发条件；不要只汇报“下一步应做 X”，也不要因为空闲而删除/暂停心跳。
+15. 汇报本轮实际执行的动作、仍阻塞的问题、提交/合并 commit、工作区是否干净、心跳仍 active 和下一次触发条件；不要只汇报“下一步应做 X”。如果 X 已授权、未阻塞且容量允许，本轮必须执行 X；不要因为空闲而删除/暂停心跳。
 ```
 
 ### PowerShell Governance Update Notes

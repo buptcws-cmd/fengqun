@@ -109,13 +109,27 @@ A total-control turn is executable by default, including prompts described as "c
 
 Treat a total-control turn as read-only only when the user or automation prompt explicitly says `read-only`, `dry-run`, `no launch`, `do not start`, `do not resume`, `do not merge`, or when policy, evidence, capacity, conflict, or missing authority blocks execution.
 
-When the snapshot, task registry, or total-control document lists next safe total-control actions, treat them as a prioritized execution queue, not suggestions. If no higher-priority completed run, outbox import, blocker ruling, resume, or merge consumes the turn and capacity remains, execute the first unblocked queue item before final reporting. That can mean assigning a role, launching a role session, resuming a cleared role, integrating a merge-ready branch, or writing the concrete blocker that prevents execution.
+When the snapshot, task registry, or total-control document lists next safe total-control actions, treat them as a prioritized execution queue, not suggestions. A total-control turn is a drain loop, not a single-action tick. After every state-changing control action, recompute authoritative state and continue with the next authorized, unblocked, capacity-allowed action before final reporting. State-changing control actions include run completion processing, outbox import, blocker ruling, resume, launch, merge, baseline refresh, stable governance commit, and worktree cleanup.
+
+If no higher-priority completed run, outbox import, blocker ruling, resume, or merge consumes the current loop iteration and capacity remains, execute the first unblocked queue item. That can mean assigning a role, launching a role session, resuming a cleared role, integrating a merge-ready branch, or writing the concrete blocker that prevents execution. Then loop again. Independent launches may be batched up to the recorded parallelism limit; they should not be split across future heartbeats merely because one launch or merge already happened in the current turn.
 
 Repeatedly reporting "next action is X" while X is authorized, unblocked, and within the recorded parallelism limit is a 野蜂 failure. If execution is impossible, record the reason with `blocked_by`, `resume_when`, `required_evidence`, and `wake_target` instead of merely naming the future action.
+
+It is valid to wait for the next heartbeat only after the drain loop reaches quiescence. Quiescence means one of these is true:
+
+- no executable work remains after checking completed runs, outbox messages, merge-ready branches, ready-to-resume blockers, active directives, dirty stable governance files, and the prioritized queue;
+- remaining work is blocked by authorization, missing evidence, dependency order, conflict, or an explicit user decision;
+- max parallel capacity is filled by active role sessions and the remaining queue depends on those sessions or would exceed safe parallelism;
+- a role was just launched or resumed and no independent safe action remains;
+- the total-control turn is hitting a practical time budget, in which case record exactly what remains executable and why it was deferred.
+
+Do not use the heartbeat cadence as a batch boundary. A closeout that says "the next heartbeat will assign X" while X can be assigned safely now is incomplete.
 
 ## Total-Control Heartbeat Lifecycle
 
 A total-control heartbeat is long-lived project infrastructure. Its job is to keep the total-control thread alive enough to notice new work, cleared blockers, finished role runs, user replies, and stale state. An idle heartbeat is a valid `IDLE_OK` result, not a reason to stop.
+
+Heartbeat cadence is a wakeup interval, not a work quantum. Each heartbeat must run the total-control drain loop until quiescence before waiting for the next cadence. The 20-minute wait, or any other cadence, begins only after all currently executable work has been completed, blocked with evidence, or delegated into running role sessions that fill the useful capacity.
 
 Do not delete, pause, or disable the total-control heartbeat merely because:
 
@@ -522,7 +536,7 @@ Keep proposals conservative. A proposal is `DRAFT` until it has been reviewed un
 
 ## Running Total-Control
 
-When acting as the total-control thread:
+When acting as the total-control thread, run the following as a loop until quiescence rather than as a one-pass checklist:
 
 1. read the status snapshot first when present;
 2. read authorization, role assignment, task registry, directives, communication route view, event log tail, and unprocessed handoffs;
@@ -530,7 +544,7 @@ When acting as the total-control thread:
 4. route messages;
 5. detect blockers that are cleared;
 6. resume roles whose conditions are satisfied;
-7. launch new roles if capacity remains, including the first unblocked item in the next safe total-control action queue;
+7. launch or resume every safe role that fits remaining capacity, including unblocked items in the next safe total-control action queue;
 8. integrate merge-ready work with evidence;
 9. update docs and machine state;
 10. refresh the status snapshot;
@@ -538,7 +552,7 @@ When acting as the total-control thread:
 12. verify the working tree is clean except for intentionally untracked/ignored runtime transport or unrelated user changes;
 13. tell the user what changed and what is still blocked.
 
-After processing run results, messages, blockers, resumes, and merges, do not end with only a recommendation if an authorized queue item remains executable. Perform it, or write the concrete blocker that prevents it. If authorized work is ready, do it.
+After processing run results, messages, blockers, resumes, merges, and stable governance commits, restart the loop from the snapshot/authoritative state. Do not end with only a recommendation if an authorized queue item remains executable. Perform it, or write the concrete blocker that prevents it. If authorized work is ready, do it in this turn; the next heartbeat is only for new facts, running-role completions, or work that is genuinely blocked now.
 
 ## Running A Role Session
 
