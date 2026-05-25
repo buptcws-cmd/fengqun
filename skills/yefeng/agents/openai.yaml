@@ -1,4 +1,4 @@
 interface:
-  display_name: "Yefeng"
-  short_description: "Turn big visions into governed, authorized series plans"
-  default_prompt: "Use $yefeng to turn my rough project idea into a governed, authorization-aware, parallel-ready series proposal system."
+  display_name: "野蜂"
+  short_description: "Use a total-control Codex thread to orchestrate role sessions, communication, review, and integration"
+  default_prompt: "使用 $yefeng / 野蜂，把我的项目推进成由总控线程分配角色、启动后台 Codex 会话、路由通信、审核合并的自动化协作系统。"

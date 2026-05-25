@@ -1,65 +1,651 @@
-# Yefeng Templates
+# 野蜂 Templates
 
-Use these templates only when the project lacks equivalent local docs.
+Use these templates only when the project lacks equivalent local docs. 野蜂 does not use self-claiming roles. The total-control thread assigns, launches, resumes, and integrates all top-level roles.
 
 ## Total-Control Document Skeleton
 
 ```md
-# 系列提案：全周期总控
+# 野蜂总控
 
 ## 1. 文档目的
 
-说明项目定位、当前推进模式，以及本文件是唯一协调面。
+本文件是项目的顶层协调面，记录目标、推进取向、角色分配原则、集成节奏、跨角色契约和审批门槛。
+
+用户默认只和总控线程对话。总控线程负责分配角色、启动/恢复后台 Codex 会话、路由通信、处理阻塞、整合已审查工作。
 
 ## 2. 顶层原则
 
-- 最终架构先行 / MVP 迭代 / 研究探索 / 修复系列
-- 先提案后实现
-- 小 checkpoint 推进
-- 并行不等于抢跑
+- 总控分配角色，不允许角色线程自认领。
+- 所有跨角色沟通必须进入通信总线。
+- 实现型角色默认一角色一 worktree/branch。
+- 角色可以部署 subagent，但 subagent 不拥有顶层角色。
+- 合并按最小可验证集成点进行。
+- 总控线程是唯一可以唤醒、恢复、停止、替换顶层角色的线程。
 
-## 3. 状态约定
+## 3. 推进取向
 
-| 状态 | 含义 | 是否可实现 |
-| --- | --- | --- |
-| DRAFT | 草案 | 否 |
-| REVIEW | 审查中 | 否 |
-| APPROVED | 已批准 | 是 |
-| ACTIVE | 正在做 | 是 |
-| BLOCKED | 阻塞 | 否 |
-| DONE | 已完成 | 不需要 |
-| PAUSED | 暂停 | 否 |
+- 当前取向：
+- 选择理由：
+- 明确非目标：
 
-## 4. 文档维护约束
+## 4. 权威文件
 
-列出总控、授权策略、角色认领表、登记表、总控指令、交接报告收件箱和各系列提案。
+| 文件 | 作用 |
+| --- | --- |
+| docs/授权策略.md | 操作授权、审查门槛、用户介入条件 |
+| docs/角色分配.md | 人类可读角色分配表 |
+| .yefeng/state/roles.json | 机器可读角色状态 |
+| .yefeng/state/runs.json | 机器可读进程/会话运行记录 |
+| .yefeng/runs/<role>/<run>/assignment.json | 本次角色会话分配清单 |
+| docs/并行任务登记.md | checkpoint、写入范围、依赖、状态 |
+| docs/总控指令.md | 总控下发给角色的指令 |
+| .yefeng/events.jsonl | 机器可读事件流 |
+| docs/角色通信/ | 人类可读通信视图 |
+| docs/交接报告/ | 临时交接收件箱 |
+| docs/总控状态快照.md | 启动/恢复时的短快照 |
 
-## 5. 能力地图或范围边界
+## 5. 角色池
 
-最终架构项目写最终能力地图；MVP 项目写范围边界。
+| 角色ID | 角色名 | 负责范围 | 默认 worktree | 默认 branch | 必读提案 | 允许写入 | 禁止写入 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
 
-## 6. 开发轨道
+## 6. 集成节奏
 
-| 轨道 | 代号 | 负责内容 | 可并行性 |
-| --- | --- | --- | --- |
+最小可验证集成点定义：
 
-## 7. 依赖约束
+- 有边界清晰的产物；
+- 有验证证据；
+- 需要 reviewer 时已有最小审查结论；
+- 已写交接报告或结果摘要；
+- 无未关闭的阻塞消息或 ACTIVE 指令。
 
-强依赖链、允许并行、禁止并行、工程初始化规则。
+## 7. 阻塞处理
 
-## 8. Checkpoint 池
+角色阻塞时必须写清：
 
-当前建议先启动、第一批实现候选、深层能力候选。
+```text
+blocked_by:
+resume_when:
+required_evidence:
+wake_target:
+safe_same_role_work_available:
+```
 
-## 9. 审批门槛
+总控线程判定 `resume_when` 满足后，使用记录的 session_id 恢复目标角色。
 
-Proposal 通过标准、Implementation 完成标准、验证证据格式。
+## 8. 变更记录
+```
 
-## 10. 冲突处理
+## Authorization Policy Skeleton
 
-写入范围冲突、契约冲突、目标变化处理顺序，以及总控指令下发/角色恢复机制。
+```md
+# 授权策略
 
-## 11. 变更记录
+## 1. 文档目的
+
+本文件记录野蜂工作中的自动化授权。总控线程、角色线程、worker subagent 和 reviewer subagent 都必须按本文件行动。
+
+## 2. 授权类别
+
+| 类别 | 含义 |
+| --- | --- |
+| AUTO | 范围内自动执行 |
+| SCOPED | 仅在指定范围内自动执行，越界转 ASK |
+| AGENT_REVIEW | 需要独立 reviewer subagent 通过后自动推进 |
+| ASK | 执行前询问用户 |
+| FORBID | 禁止执行 |
+
+## 3. 默认授权矩阵
+
+| 操作 | 授权 | 自动范围 | 需要证据 | 越界处理 |
+| --- | --- | --- | --- | --- |
+| 总控分配角色 | AUTO | docs/角色分配.md; .yefeng/state/roles.json | assignment_id + 事件 | ASK |
+| 启动/恢复 Codex 角色会话 | AUTO | 已分配角色；max_parallel 内 | run_id + session_id/日志 | ASK |
+| 停止/替换失效角色会话 | SCOPED | EXPIRED/FAILED 或总控明确暂停 | 原 run 记录 | ASK |
+| 创建角色 worktree/branch | SCOPED | worktrees/<role_id>; codex/yefeng/<role_id>/** | git 输出 + 状态记录 | ASK |
+| 修改角色分配表 | SCOPED | 总控线程；角色仅能写本角色状态反馈字段 | 事件 + diff | ASK |
+| 写通信事件 | AUTO | .yefeng/events.jsonl; .yefeng/messages/** | message_id | ASK |
+| 导入角色本地 outbox | AUTO | 角色 worktree 的 `.yefeng/outbox/*.json` 到共享事件流 | message_id + source_file | ASK |
+| 更新通信 Markdown 视图 | AUTO | docs/角色通信/** | 对应 message_id | ASK |
+| 写交接报告 | AUTO | docs/交接报告/** | 报告文件 | ASK |
+| 写总控指令 | SCOPED | 总控线程创建/关闭；目标角色只写反馈字段 | directive_id | ASK |
+| 部署 worker subagent | AUTO | 本角色任务范围 | 子任务说明 | ASK |
+| 部署 reviewer subagent | AUTO | 本角色审查门槛 | 最小审查结论 | ASK |
+| proposal 审核 | AGENT_REVIEW | 对应角色提案 | reviewer 结论 | 不通过则修复重审 |
+| checkpoint 实现 | AGENT_REVIEW | 已批准范围 | 测试/验证 + reviewer | 不通过则修复重审 |
+| merge 到集成线 | AGENT_REVIEW | MERGE_READY 角色分支 | diff + 测试 + reviewer | ASK |
+| 清理已合并 worktree/branch | SCOPED | 已合并且无未保存产物 | merge 记录 | ASK |
+| 安装依赖 | SCOPED | 已批准技术栈 | lockfile diff + 构建验证 | ASK |
+| 使用真实密钥/外部账号 | ASK | 无 | 用户确认 | FORBID |
+| 发布/云同步/外部写入 | ASK | 无 | 用户确认 | FORBID |
+| 删除非野蜂运行产物 | ASK | 无 | 用户确认 | FORBID |
+| 使用 dangerously bypass | ASK | 无 | 用户确认 | FORBID |
+
+说明：
+
+- `codex exec` 不应传入交互 CLI 专用的 `-a/--ask-for-approval` 参数；只使用 `codex exec --help` 中存在的参数。
+- `codex exec resume` 若没有 `-C`，必须从角色 worktree 目录发起；恢复前先创建 run 日志目录，避免 stdout/stderr 重定向先失败。
+- 默认记录 sandbox mode。Windows 上总控启动第一批实现角色前应先运行一次 sandbox probe：用 `workspace-write` 启动极小 `codex exec`，要求打印当前目录；若出现 `CreateProcessAsUserW failed: 5`，把 `workspace-write-shell=false` 写入状态快照或 runs 状态。之后需要 shell 的实现角色在独立 worktree 内使用 `-s danger-full-access`，但不得使用 approval bypass。
+- `.yefeng/runs/`、`.yefeng/assignment.json`、`.yefeng/outbox/` 默认是本地运行/运输材料，建议加入 `.gitignore`；长期事实写入状态 JSON、事件 JSONL、通信视图和交接摘要。
+
+## 4. 用户介入条件
+
+- 扩大授权策略；
+- 使用真实密钥、外部账号、付费服务、发布或云写入；
+- 删除或覆盖非本任务创建的文件；
+- reviewer 不通过但角色想继续；
+- 总控、授权策略、登记表和指令无法裁决的冲突。
+
+## 5. 模型/推理档位
+
+- highest：总控整合、架构、授权、安全、合并、关键 reviewer、困难根因定位。
+- high：共享实现、迁移、编辑器/版本/AI 逻辑、非平凡重构。
+- medium：边界清晰实现、测试、局部文档、验证。
+- economy：机械搜索、格式整理、依赖清点、低风险摘要。
+
+不确定时升档。关键 reviewer 不应弱于被审查任务的风险。
+```
+
+## Role Assignment Board Skeleton
+
+```md
+# 角色分配
+
+## 1. 文档目的
+
+本文件记录总控线程分配给后台 Codex 会话的顶层角色。角色线程不得自认领，也不得互相调度。
+
+机器可读状态见 `.yefeng/state/roles.json`。本文件是人类可读视图；两者冲突时，总控线程必须暂停调度并先校准。
+
+## 2. 状态约定
+
+| 状态 | 含义 |
+| --- | --- |
+| PLANNED | 角色存在但尚未分配 |
+| ASSIGNED | 已由总控分配，尚未运行 |
+| RUNNING | 对应进程/会话正在运行 |
+| WAITING_REVIEW | 等待本角色 reviewer 结果 |
+| BLOCKED | 等待记录的恢复条件 |
+| READY_TO_RESUME | 总控判定阻塞已解除，可恢复 |
+| REPORT_READY | 交接/证据已就绪，无安全续作 |
+| MERGE_READY | 审查和验证齐备，可由总控集成 |
+| DONE | 本轮范围完成 |
+| FAILED | 进程失败或输出无效 |
+| EXPIRED | 租约过期或进程死亡，可替换 |
+
+## 3. 分配表
+
+| 优先级 | 角色ID | 角色 | 状态 | assignment_id | session_id | process_id | run_id | worktree | branch | 当前 checkpoint | owned_scope | forbidden_scope | blocked_by | resume_when | required_evidence | wake_target | last_seen | lease_expires_at | last_output |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | INTEGRATOR | 总控线程 | RUNNING |  | 当前总控线程 |  |  | 项目根 | main/integration | orchestration | 总控、分配、通信、指令、集成 | 直接实现未分配源码任务 |  |  |  |  |  |  |  |
+| 1 | COORD-P | 产品与信息架构 | PLANNED |  |  |  |  |  |  |  | docs/系列提案-产品与信息架构.md | 未授权源码和其他角色文件 |  |  |  |  |  |  |  |
+| 2 | COORD-D | 数据与存储 | PLANNED |  |  |  |  |  |  |  | docs/系列提案-数据与存储.md; assigned worktree | 其他角色 worktree |  |  |  |  |  |  |  |
+| 3 | COORD-EV | 编辑器与版本 | PLANNED |  |  |  |  |  |  |  | docs/系列提案-编辑器与版本.md; assigned worktree | 其他角色 worktree |  |  |  |  |  |  |  |
+| 4 | COORD-A | AI 调度与上下文 | PLANNED |  |  |  |  |  |  |  | docs/系列提案-AI调度与上下文.md; assigned worktree | 其他角色 worktree |  |  |  |  |  |  |  |
+| 5 | COORD-K | 知识库深化 | PLANNED |  |  |  |  |  |  |  | docs/系列提案-知识库深化.md; assigned worktree | 其他角色 worktree |  |  |  |  |  |  |  |
+| 6 | COORD-G | 工程化与发布 | PLANNED |  |  |  |  |  |  |  | docs/系列提案-工程化与发布.md; assigned worktree | 其他角色 worktree |  |  |  |  |  |  |  |
+| 7 | COORD-Q | 质量与验证 | PLANNED |  |  |  |  |  |  |  | docs/系列提案-质量与验证.md; assigned worktree | 其他角色 worktree |  |  |  |  |  |  |  |
+
+## 4. 总控调度规则
+
+1. 只有总控线程可把角色从 `PLANNED` 改为 `ASSIGNED`。
+2. 只有总控线程可启动或恢复顶层角色会话。
+3. 角色线程只能更新本角色进度、阻塞、证据和交接字段。
+4. 角色线程不能唤醒其他角色，只能写消息。
+5. 租约过期或进程死亡后，总控线程把角色标为 `EXPIRED` 并分配新会话。
+```
+
+## Machine State Skeleton
+
+`.yefeng/state/roles.json`
+
+```json
+{
+  "version": 1,
+  "updated_at": "YYYY-MM-DDTHH:mm:ssZ",
+  "updated_by": "INTEGRATOR",
+  "roles": [
+    {
+      "role_id": "COORD-D",
+      "role_name": "数据与存储",
+      "assigned_by": "INTEGRATOR",
+      "assignment_id": "assign-YYYYMMDD-HHMMSS-COORD-D",
+      "session_id": "",
+      "process_id": null,
+      "run_id": "",
+      "state": "ASSIGNED",
+      "worktree": "worktrees/COORD-D",
+      "branch": "codex/yefeng/COORD-D/D0",
+      "owned_scope": ["docs/系列提案-数据与存储.md", "worktrees/COORD-D"],
+      "forbidden_scope": ["其他角色 worktree", "未授权总控文件"],
+      "current_checkpoint": "D0",
+      "blocked_by": "",
+      "resume_when": "",
+      "required_evidence": "",
+      "wake_target": "",
+      "last_seen": "",
+      "lease_expires_at": "",
+      "last_output": ""
+    }
+  ]
+}
+```
+
+`.yefeng/state/runs.json`
+
+```json
+{
+  "version": 1,
+  "runs": [
+    {
+      "run_id": "run-YYYYMMDD-HHMMSS-COORD-D",
+      "role_id": "COORD-D",
+      "assignment_id": "assign-YYYYMMDD-HHMMSS-COORD-D",
+      "session_id": "",
+      "process_id": null,
+      "command": "codex exec ...",
+      "cwd": "worktrees/COORD-D",
+      "stdout_jsonl": ".yefeng/runs/COORD-D/run-.../stdout.jsonl",
+      "stderr": ".yefeng/runs/COORD-D/run-.../stderr.log",
+      "last_message": ".yefeng/runs/COORD-D/run-.../last-message.md",
+      "assignment_manifest": ".yefeng/runs/COORD-D/run-.../assignment.json",
+      "sandbox_mode": "workspace-write",
+      "started_at": "",
+      "ended_at": "",
+      "exit_code": null,
+      "status": "RUNNING"
+    }
+  ]
+}
+```
+
+Per-run assignment manifest, stored at `.yefeng/runs/<role_id>/<run_id>/assignment.json` and optionally copied to the role worktree as `.yefeng/assignment.json`:
+
+```json
+{
+  "version": 1,
+  "assignment_id": "assign-YYYYMMDD-HHMMSS-COORD-D",
+  "run_id": "run-YYYYMMDD-HHMMSS-COORD-D",
+  "role_id": "COORD-D",
+  "role_name": "数据与存储",
+  "checkpoint": "D0",
+  "assigned_by": "INTEGRATOR",
+  "control_root": "D:/project",
+  "worktree": "D:/project-worktrees/COORD-D",
+  "branch": "codex/yefeng/COORD-D/D0",
+  "owned_scope": ["src/data/**", "docs/交接报告/**", ".yefeng/outbox/**"],
+  "forbidden_scope": ["docs/角色分配.md", ".yefeng/state/**", "其他角色 worktree"],
+  "outbox_dir": ".yefeng/outbox",
+  "handoff_dir": "docs/交接报告",
+  "sandbox_mode": "workspace-write",
+  "created_at": "YYYY-MM-DDTHH:mm:ssZ"
+}
+```
+
+## Event JSONL Pattern
+
+Each line in `.yefeng/events.jsonl` is one JSON object.
+
+```json
+{
+  "event_id": "evt-YYYYMMDD-HHMMSS-xxxx",
+  "created_at": "YYYY-MM-DDTHH:mm:ssZ",
+  "type": "QUESTION",
+  "from": "COORD-A",
+  "to": "COORD-D",
+  "role_id": "COORD-A",
+  "checkpoint": "A1",
+  "message_id": "msg-YYYYMMDD-HHMMSS-COORD-A-COORD-D",
+  "blocking": true,
+  "blocked_role": "COORD-A",
+  "blocked_checkpoint": "A1",
+  "blocked_by": "COORD-D schema contract",
+  "resume_when": "COORD-D publishes reviewed schema contract D0",
+  "required_evidence": "reviewer-passed schema contract summary",
+  "wake_target": "COORD-A",
+  "status": "OPEN",
+  "payload": "Question or summary here",
+  "related_files": ["docs/系列提案-AI调度与上下文.md"],
+  "evidence": []
+}
+```
+
+Event types:
+
+```text
+ROLE_ASSIGNED
+ROLE_STARTED
+ROLE_OUTPUT
+ROLE_BLOCKED
+ROLE_READY_TO_RESUME
+ROLE_DONE
+QUESTION
+ANSWER
+BLOCKER
+CONTRACT_CHANGE
+REVIEW_REQUEST
+REVIEW_RESULT
+HANDOFF
+BASELINE_UPDATED
+RESUME_NOTICE
+USER_DECISION_REQUIRED
+DIRECTIVE
+```
+
+## Role Communication README
+
+```md
+# 角色通信
+
+本目录是 `.yefeng/events.jsonl` 和 `.yefeng/messages/` 的人类可读视图。角色之间可以写消息，但不能互相唤醒或调度。所有恢复、停止、替换、重新分配都由总控线程执行。
+
+实现型角色通常在自己的 worktree 内写 `.yefeng/outbox/<message_id>.json`。总控线程导入这些 outbox 后，才写入共享 `.yefeng/events.jsonl` 和本目录视图。角色不要并发直接追加共享事件流，除非总控明确提供了序列化写入机制。
+
+导入完成后，除非项目明确要归档运输消息，否则不要把角色 worktree 的 `.yefeng/outbox/` 合并进主线。共享事件流和本目录视图才是长期事实。
+
+## 文件
+
+- `总控路由.md`：总控已路由、待路由、已关闭消息。
+- `<role_id>.inbox.md`：发给某角色的消息视图。
+- `<role_id>.outbox.md`：某角色发出的消息视图。
+
+## 消息状态
+
+| 状态 | 含义 |
+| --- | --- |
+| OPEN | 已写入，待总控路由 |
+| ROUTED | 总控已决定处理方式 |
+| WAKING_TARGET | 总控将恢复目标角色 |
+| ANSWERED | 已有回答 |
+| BLOCKING | 阻塞已登记 |
+| CLOSED | 稳定事实已回写，消息关闭 |
+
+## 消息模板
+
+| message_id | 状态 | from | to | 类型 | blocking | checkpoint | 摘要 | resume_when | required_evidence | 总控路由 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+```
+
+## Parallel Task Registry Skeleton
+
+```md
+# 并行任务登记
+
+## 1. 文档目的
+
+记录 checkpoint、写入范围、依赖、审查证据、合并状态和阻塞关系。角色是谁由 `docs/角色分配.md` 管；消息交流由通信总线管；总控裁决由 `docs/总控指令.md` 管。
+
+## 2. 状态约定
+
+| 状态 | 含义 |
+| --- | --- |
+| DRAFT | 草案 |
+| REVIEW | 审查中 |
+| APPROVED | 可实现 |
+| ACTIVE | 正在做 |
+| BLOCKED | 阻塞 |
+| REVIEWED | 已通过审查 |
+| MERGE_READY | 可集成 |
+| DONE | 已完成 |
+| PAUSED | 暂停 |
+
+## 3. 当前任务
+
+| ID | checkpoint | 类型 | 状态 | assigned_role | worktree/branch | 写入范围 | 禁止范围 | 前置依赖 | 影响契约 | 预期产物 | 验证方式 | reviewer 结论 | 阻塞/消息 | 交接说明 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+```
+
+## Control Directive Board Skeleton
+
+```md
+# 总控指令
+
+## 1. 文档目的
+
+本文件记录总控线程下发给角色线程的当前有效指令。它是向下调度面，不是交接收件箱，也不是第二份总控。
+
+## 2. 状态
+
+| 状态 | 含义 |
+| --- | --- |
+| ACTIVE | 总控已下发，目标角色必须先处理 |
+| ACKNOWLEDGED | 角色已确认 |
+| APPLIED | 角色已按指令完成 |
+| SUPERSEDED | 被新指令替代 |
+| CLOSED | 稳定事实已回写，指令结束 |
+
+## 3. 当前指令
+
+| ID | 状态 | 创建时间 | 来源 | 目标角色 | 目标 checkpoint | 涉及契约/文件 | 总控裁决 | 要求动作 | 允许写入范围 | 恢复条件 | 角色反馈/交接 | 关闭条件 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+```
+
+## Handoff Inbox Pattern
+
+```md
+# 交接报告收件箱
+
+本目录只保存尚未整合的临时交接报告。总控线程处理报告后，必须把稳定事实回写到角色分配、任务登记、总控指令、总控文档、通信总线或对应提案，然后删除或清空已处理报告。
+
+交接报告不是角色锁，也不是长期事实源。若交接报告声称完成但缺少授权策略要求的 reviewer 闭环，总控应退回对应角色补审，不登记为完成。
+
+临时文件：
+
+- `YYYYMMDD-HHMM-<role>-<checkpoint>.md`
+
+消化摘要规则：
+
+- 不复制长报告全文。
+- 只保留角色/checkpoint、处理时间、状态变化、变更范围、稳定事实、阻塞/指令、下一责任人。
+- reviewer 过程材料只保留最小审查结论。
+```
+
+## Handoff Report Template
+
+```md
+# 交接报告：<role> / <checkpoint>
+
+状态：待总控整合
+角色：
+assignment_id：
+session_id：
+run_id：
+checkpoint：
+生成时间：
+
+## 1. 已完成修改
+
+- 修改文件：
+- 涉及章节：
+- 新增或调整内容：
+
+## 2. 验证证据
+
+- 命令：
+- 结果：
+- 未运行原因：
+
+## 3. Reviewer 结论
+
+- reviewer：
+- 范围：
+- 结论：
+- 返工项：
+- 重审状态：
+- 解锁/阻塞影响：
+
+## 4. 跨角色影响
+
+- 影响契约：
+- 影响角色：
+- 已写消息：
+- 需要总控路由：
+
+## 5. 阻塞或恢复条件
+
+blocked_by：
+resume_when：
+required_evidence：
+wake_target：
+safe_same_role_work_available：
+
+## 6. 总控回写建议
+
+- 任务登记：
+- 角色分配：
+- 总控指令：
+- 通信消息：
+- 状态快照：
+
+## 7. 建议消化摘要
+
+- 一句话摘要：
+- 状态变化：
+- 必须登记的稳定事实：
+- 可删除的临时细节：
+```
+
+## Assigned Role Prompt Pattern
+
+Use this for a top-level role session launched by the total-control thread.
+
+```text
+请使用 yefeng / 野蜂。工作目录是 <worktree-or-project-root>。
+
+你不是自认领角色。你已被总控线程分配为：
+
+- role_id: <role_id>
+- role_name: <role_name>
+- assignment_id: <assignment_id>
+- run_id: <run_id>
+- assignment_manifest: <control-root>/.yefeng/runs/<role>/<run>/assignment.json
+- session_id: <session_id-if-known>
+- worktree: <worktree>
+- branch: <branch>
+- checkpoint: <checkpoint>
+
+你不能分配自己或其他顶层角色，不能唤醒/恢复其他角色，不能接第二个顶层角色。跨角色沟通必须写入本 worktree 的 `.yefeng/outbox/`；由总控导入共享通信总线并决定是否唤醒目标角色。
+
+注意：你所在 worktree 中的 `docs/角色分配.md` 或 `.yefeng/state/roles.json` 可能是创建 worktree 时的旧快照。你应以本提示和 assignment manifest 为本次分配依据；如发现本地快照仍显示 `PLANNED`，记录到交接报告，不要修改总控状态文件。
+
+允许写入：
+<owned_scope>
+
+禁止写入：
+<forbidden_scope>
+
+先读取：
+1. docs/授权策略.md
+2. docs/角色分配.md
+3. .yefeng/state/roles.json
+4. docs/并行任务登记.md
+5. docs/总控指令.md
+6. docs/角色通信/<role_id>.inbox.md（若存在，可能是旧快照）
+7. docs/野蜂总控.md 或项目总控文档
+8. <your-series-doc>
+9. .yefeng/events.jsonl 的最新相关事件
+
+如果存在点名你的 ACTIVE 指令或 blocking message，先处理它。
+
+任务：
+<specific assignment>
+
+你可以按授权策略部署 worker/reviewer subagent。subagent 只属于你的角色，不拥有顶层角色。
+
+若阻塞，必须写清：
+blocked_by:
+resume_when:
+required_evidence:
+wake_target:
+safe_same_role_work_available:
+
+完成后：
+- 写交接报告到 docs/交接报告/YYYYMMDD-HHMM-<role>-<checkpoint>.md；
+- 写本地 outbox 事件到 .yefeng/outbox/<message_id>.json；
+- 汇报修改文件、验证证据、reviewer 结论、阻塞/恢复条件、建议总控回写；
+- 不要等待总控聊天回复做隐藏状态。
+```
+
+## Worker Prompt Pattern
+
+```text
+你是 <role_id> 角色线程部署的 worker subagent，不是野蜂顶层角色。
+
+你的唯一任务范围：
+<task>
+
+允许写入：
+<scope>
+
+禁止写入：
+<forbidden>
+
+你不是单独在工作区中工作，不要回退他人修改。完成后向 <role_id> 汇报：
+- 修改文件
+- 验证方式和结果
+- 风险/冲突
+- 是否需要 reviewer
+```
+
+## Reviewer Prompt Pattern
+
+```text
+你是 <role_id> 角色线程部署的独立 reviewer subagent。你不是作者，也不是野蜂顶层角色。
+
+审查范围：
+<scope>
+
+检查：
+- 是否符合授权策略和写入范围；
+- 是否满足 checkpoint 目标；
+- 是否有未登记跨角色契约变化；
+- 测试/验证证据是否足够；
+- 是否可以解锁 APPROVED / DONE / MERGE_READY。
+
+输出最小审查结论：
+- reviewer:
+- scope:
+- verdict: pass / fail / needs_changes
+- required_fixes:
+- re_review_needed:
+- unlock_or_block_effect:
+```
+
+## Total-Control Launch Prompt Pattern
+
+```text
+作为野蜂总控线程，读取授权策略、角色分配、任务登记、总控指令、通信总线、状态快照和交接报告。
+
+目标：
+<user goal>
+
+请执行总控职责：
+1. 选择下一批可并行角色，数量不超过 <max_parallel>；
+2. 为实现型角色创建独立 worktree/branch；
+3. 写入 docs/角色分配.md 和 .yefeng/state/roles.json；
+4. 为每个角色生成 assignment.json 和 assigned role prompt；
+5. 用 codex exec 启动后台角色会话；不要传 `-a/--ask-for-approval`；
+6. 从 JSONL 的 `thread.started.thread_id` 解析 session_id；
+7. 记录 run/session/process/log/last-message/prompt/assignment/sandbox；
+8. 写 ROLE_ASSIGNED / ROLE_STARTED 事件；
+9. 给用户报告启动了什么、等待什么、下一次如何继续。
+```
+
+## Total-Control Poll / Resume Prompt Pattern
+
+```text
+作为野蜂总控线程，检查后台角色会话、通信总线、阻塞条件、交接报告、reviewer 证据和 merge-ready 分支。
+
+请执行：
+1. 处理已完成 run；
+2. 更新 roles.json、runs.json、docs/角色分配.md；
+3. 导入角色 worktree 的 `.yefeng/outbox/*.json` 并路由 OPEN 消息；
+4. 判断 BLOCKED 角色的 resume_when 是否满足；
+5. 对 READY_TO_RESUME 角色，先更新其 worktree 基线，再从该 worktree 目录使用 session_id 恢复；
+6. 对 MERGE_READY 角色检查 reviewer/验证证据，排除 `.yefeng/assignment.json` 和 `.yefeng/outbox/**` 后集成；
+7. 集成后写 BASELINE_UPDATED 事件并唤醒受影响角色；
+8. 刷新 docs/总控状态快照.md；
+9. 汇报仍阻塞的问题和下一步。
 ```
 
 ## Series Proposal Header
@@ -74,421 +660,4 @@ Proposal 通过标准、Implementation 完成标准、验证证据格式。
 写入范围：
 审批门槛：
 验证方式：
-```
-
-## Authorization Policy Skeleton
-
-```md
-# 授权策略
-
-## 1. 文档目的
-
-本文件记录系列提案和后续开发中的操作授权。所有对话、协调者、subagent、reviewer 和最终整合者都必须先读取本文件，再决定是否可以自动执行、需要 agent 审核，还是必须询问用户。
-
-## 2. 授权模式
-
-| 模式 | 含义 |
-| --- | --- |
-| AUTO | 范围内自动执行 |
-| SCOPED | 仅在指定范围内自动执行，越界转 ASK |
-| AGENT_REVIEW | 需要独立 reviewer subagent 通过后自动推进 |
-| ASK | 执行前询问用户 |
-| FORBID | 禁止执行 |
-
-审核路径由授权模式决定：`ASK` 表示用户或指定人工审核；`AGENT_REVIEW` 表示用户已授权当前系列协调者自行部署独立 reviewer subagent。最终整合者只整合 reviewer 已通过证据、处理冲突和回写共享状态，不作为常规默认 reviewer。
-
-## 3. 默认授权矩阵
-
-| 操作 | 授权模式 | 自动范围 | 需要证据 | 越界处理 |
-| --- | --- | --- | --- | --- |
-| 修改系列提案文档 | SCOPED | 本角色 owned proposal | diff + 交接报告 | ASK |
-| 修改角色认领 | SCOPED | 仅本角色认领/状态字段 | 认领记录 | ASK |
-| 修改总控指令 | SCOPED | 整合者创建/关闭指令；被指令点名的角色只能写入本角色确认/反馈字段 | 指令 ID + 来源报告 | ASK |
-| 写交接报告 | AUTO | docs/交接报告/本角色报告 | 报告文件 | ASK |
-| 部署 subagent | AUTO | 本角色子任务 | 子任务说明 | ASK |
-| 管理本角色 heartbeat | SCOPED | 当前对话线程；有具体恢复条件且无可推进任务时启用，主动执行时暂停，角色完成后停止 | 当前 blocker 或恢复条件说明 | ASK |
-| 刷新角色软租约 | AUTO | 本角色 `last_seen`、`lease_expires_at`、`heartbeat_status` | 进展或等待状态说明 | ASK |
-| proposal 审核 | AGENT_REVIEW | 当前协调者部署独立 reviewer subagent | 最小审查结论 | 不通过则修复后重新送审 |
-| proposal 进入 APPROVED | AGENT_REVIEW | reviewer 通过 + 无 BLOCKED | 最小审查结论 + 总控回写 | ASK |
-| 实现 checkpoint | AGENT_REVIEW | 相关 proposal APPROVED 后 | 测试/验证证据 | 不通过则修复后重新送审 |
-| worktree 创建/合并/清理 | AGENT_REVIEW | 本 checkpoint worktree | 测试 + 最小审查结论 | 不通过则修复后重新送审 |
-| git 初始化/基线提交 | SCOPED | 当前项目根目录 | 命令输出 + 状态记录 | ASK |
-| 安装依赖 | SCOPED | 已批准技术栈 | lockfile diff + 构建验证 | ASK |
-| 使用真实密钥/外部账号 | ASK | 无 | 用户确认 | FORBID |
-| 发布/云同步/外部写入 | ASK | 无 | 用户确认 | FORBID |
-| 删除非本任务创建文件 | ASK | 无 | 用户确认 | FORBID |
-
-## 4. Agent 审核门槛
-
-Proposal 通过：
-
-- 若门槛为 `AGENT_REVIEW`，由当前系列协调者部署 reviewer；若门槛为 `ASK`，交给用户或指定人工审核；
-- reviewer 不是 proposal 作者；
-- 检查目标、范围、依赖、契约、验证方式、阻塞对象；
-- 无未登记的跨模块冲突；
-- 输出“通过/不通过/需修改”。
-- 若不通过或需修改，协调者先修复并重新部署 reviewer；只有无法修复、缺少依赖、跨角色冲突或想无视 reviewer 继续时才转 `BLOCKED` / `ASK`。
-
-Implementation 通过：
-
-- 若门槛为 `AGENT_REVIEW`，由当前系列协调者部署 reviewer；若门槛为 `ASK`，交给用户或指定人工审核；
-- reviewer 不是实现者；
-- 检查 diff、测试、lint/build、手动路径、安全边界、文档回写；
-- 无未授权写入或未登记契约变化；
-- 输出“通过/不通过/需修改”。
-- 若不通过或需修改，实现者先修复并重新部署 reviewer；只有无法修复、缺少依赖、跨角色冲突或想无视 reviewer 继续时才转 `BLOCKED` / `ASK`。
-
-## 5. 用户介入条件
-
-遇到以下情况必须 ASK：
-
-- 扩大授权策略本身；
-- 真实 API Key、外部账号、云服务、支付、发布；
-- 删除或覆盖不属于本任务创建的文件；
-- 冲突无法由总控、授权策略、登记表和总控指令裁决；
-- reviewer subagent 给出不通过但协调者想继续。
-
-## 6. 角色 heartbeat
-
-每个系列协调者可以管理自己所在对话线程的 heartbeat。heartbeat 只能唤醒创建它的对话，不能跨对话唤醒其他角色，因此不需要单独的共享心跳文档。
-
-- 仅在等待依赖、reviewer、其他角色必要产物、总控指令或用户/人工审核决策等具体恢复条件，且本角色无可推进任务时启用；
-- 正在主动执行任务时暂停或不启动；
-- 活跃任务用软租约续期，不用 heartbeat 打断执行；长任务可设置较长 `lease_expires_at`；
-- 不因交接报告尚未被消化而单独启用；
-- 醒来后读取授权策略、角色认领、任务登记、总控指令、总控、交接报告和本角色提案；
-- 角色 DONE 后停止。
-```
-
-## Role Claim Board Skeleton
-
-```md
-# 角色认领
-
-## 1. 文档目的
-
-本文件记录多对话并行时的顶层角色认领情况。新对话使用 yefeng 时，如果用户未指定角色，应先读取本文件并自动认领一个 `OPEN` 角色。
-
-`INTEGRATOR` 是最高优先级角色，优先级固定为 0。多对话执行开始前必须先有且只能有一个 `INTEGRATOR` 处于 `CLAIMED` 或 `ACTIVE`；如果没有，新执行对话应先认领 `INTEGRATOR`，而不是直接认领系列协调者。
-
-角色认领表回答“谁是谁”；并行任务登记回答“谁正在做哪个 checkpoint”。两者不要混成一个表。
-
-## 2. 状态约定
-
-| 状态 | 含义 |
-| --- | --- |
-| OPEN | 尚未认领 |
-| CLAIMED | 已认领，尚未正式推进 |
-| ACTIVE | 正在推进 |
-| REPORT_READY | 已完成本角色当前可推进工作，交接/证据已就绪 |
-| BLOCKED | 因冲突、依赖或决策缺失暂停 |
-| STALE_CANDIDATE | 软租约过期但尚未确认可接管；需要最终整合者或用户核对 |
-| DONE | 本轮角色任务已完成 |
-| COLLISION | 出现重复认领，需要整合者裁决 |
-
-## 3. 自认领流程
-
-1. 读取授权策略、本文件、总控、并行任务登记、总控指令和交接报告 README。
-2. 确认存在 `INTEGRATOR` 行，且优先级为 0；缺失时先补入。
-3. 如果 `INTEGRATOR` 为 `OPEN`，且当前对话是执行对话，先认领 `INTEGRATOR`。
-4. 如果 `INTEGRATOR` 已 `CLAIMED` / `ACTIVE`，选择优先级最高且状态为 `OPEN` 的系列协调者。
-5. 确认该角色写入范围没有与 `CLAIMED` / `ACTIVE` 任务冲突。
-6. 读取当前对话可感知的 `CODEX_THREAD_ID`；若不存在，则生成一次 UUID fallback 并持久写入。生成唯一 `role_instance_id`，将该角色改为 `CLAIMED`，写入 owner、thread_id、认领时间、目标 checkpoint、`last_seen`、`lease_expires_at`、`heartbeat_status`，以及实现阶段才需要的 branch/worktree。
-7. 开始工作时改为 `ACTIVE`。
-8. 完成本轮后写入交接报告，并把角色改为 `REPORT_READY`；交接报告是证据包，不是阻塞锁。
-9. 软租约过期只表示 `STALE_CANDIDATE`，不得自动释放或接管；最终整合者应核对交接、登记、git 活动、heartbeat 和总控指令后再处理。
-10. 如果 `INTEGRATOR` 和所有必需系列协调者均不再是 `OPEN`，最终整合者应报告“角色已认领完毕”。
-
-## 4. 角色池
-
-Owner 命名规则：
-
-- 不使用“本对话”“当前线程”等临时描述作为 owner。
-- 优先使用当前环境可感知的 `CODEX_THREAD_ID` 区分对话；没有时生成 UUID fallback。
-- 使用 `<ROLE_ID>@thread-<thread_id_or_uuid>`。
-- branch/worktree 只用于实现阶段隔离文件改动，不参与对话身份命名。
-- 创建 branch/worktree 后，在登记表或交接报告中写明 branch 和 worktree path。
-- 历史 owner 若把 worktree/proposal slug 混进身份，所属角色下次恢复前必须改为 thread_id 身份格式。
-- 历史 owner 若缺少 thread_id，或把 worktree/proposal slug 混进身份，所属角色下次恢复前必须先回写自己的 `CODEX_THREAD_ID` 并改为 thread 身份格式。
-
-示例：
-
-- `INTEGRATOR@thread-019e4a8c-1bf9-7ca2-8b6d-984aa15e98cf`
-- `COORD-P@thread-019e4b19-4109-7250-b682-8afa4bfe75b2`
-- `COORD-D@thread-019e4c20-8a77-7000-9123-example000001`
-
-| 优先级 | 角色ID | 角色 | 状态 | owner / role_instance_id | thread_id | last_seen | lease_expires_at | heartbeat_status | branch/worktree | 负责范围 | 允许写入 | 禁止写入 | 当前 checkpoint | 认领时间 | 交接报告 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | INTEGRATOR | 最终总控整合者 | OPEN |  |  |  |  |  |  | 整合、冲突、登记、总控、授权策略执行 | docs/并行任务登记.md; docs/总控指令.md; docs/系列提案-全周期总控.md; docs/交接报告/** | 源码直接实现；缺少最小审查结论时推进 APPROVED/DONE |  |  |  |
-| 1 | COORD-P | 产品与信息架构协调者 | OPEN |  |  |  |  |  |  | P0/P1/P2 | docs/系列提案-产品与信息架构.md | 总控、登记表、源码 |  |  |  |
-| 2 | COORD-D | 数据与存储协调者 | OPEN |  |  |  |  |  |  | D0/D1/D2 | docs/系列提案-数据与存储.md | 总控、登记表、源码 |  |  |  |
-| 3 | COORD-EV | 编辑器与版本协调者 | OPEN |  |  |  |  |  |  | E0/V0/E1/V1/V2 | docs/系列提案-编辑器与版本.md | 总控、登记表、源码 |  |  |  |
-| 4 | COORD-A | AI 调度与上下文协调者 | OPEN |  |  |  |  |  |  | A0/A1/A2/A3/A4 | docs/系列提案-AI调度与上下文.md | 总控、登记表、源码 |  |  |  |
-| 5 | COORD-K | 知识库深化协调者 | OPEN |  |  |  |  |  |  | K0-K7 | docs/系列提案-知识库深化.md | 总控、登记表、源码 |  |  |  |
-| 6 | COORD-G | 工程化与发布协调者 | OPEN |  |  |  |  |  |  | G0-G4 | docs/系列提案-工程化与发布.md | 总控、登记表、源码 |  |  |  |
-| 7 | COORD-Q | 质量与验证协调者 | OPEN |  |  |  |  |  |  | Q0-Q3 | docs/系列提案-质量与验证.md | 总控、登记表、源码 |  |  |  |
-
-## 5. 全部认领判定
-
-当前结论：尚未全部认领。
-
-当 `INTEGRATOR` 和所有必需系列协调者状态均不为 `OPEN` 时，最终整合者将本节改为：角色已认领完毕，并列出 owner。
-```
-
-## Parallel Task Registry Skeleton
-
-```md
-# 并行任务登记
-
-## 1. 文档目的
-
-记录多对话、多角色、多 subagent 并行推进时的认领状态、写入范围、阻塞关系和交接说明。总控给角色的冲突裁决和恢复指令放在 `docs/总控指令.md`。
-
-## 2. 使用原则
-
-- 主线可见。
-- 先认领，后工作。
-- 写入范围优先。
-- 跨模块契约回主线。
-
-## 3. 状态约定
-
-| 状态 | 含义 | 谁可设置 |
-| --- | --- | --- |
-| OPEN | 可认领 | 协调者 |
-| CLAIMED | 已认领 | 协调者 |
-| ACTIVE | 正在做 | 协调者 |
-| REVIEW_REQUESTED | 等待审查 | 协调者 |
-| REVIEW | 审查中 | 协调者 |
-| BLOCKED | 阻塞 | 协调者 |
-| DONE | 完成 | 协调者 |
-| PAUSED | 暂停 | 协调者 |
-
-## 4. 当前任务登记
-
-| ID | checkpoint | 类型 | 状态 | owner | 写入范围 | 禁止范围 | 前置依赖 | 影响契约 | 预期产物 | 验证方式 | 交接说明 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-
-## 5. 开放任务池
-
-| ID | checkpoint | 类型 | 状态 | 建议 owner | 写入范围 | 禁止范围 | 前置依赖 | 预期产物 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-
-## 6. 并行角色启动提示词
-
-请使用 yefeng。先阅读授权策略、角色认领、并行任务登记、总控指令和总控。如果未指定角色，自动认领一个 OPEN 角色。认领前读取 `$env:CODEX_THREAD_ID` 作为 thread_id；若不存在则生成 UUID fallback。认领时生成 `<ROLE_ID>@thread-<thread_id_or_uuid>` 格式的 role_instance_id。worktree 只在实现阶段作为隔离目录单独登记，不用于区分对话。认领后先检查是否有点名本角色的 ACTIVE 总控指令，再按授权策略推进自己的 checkpoint。
-```
-
-## Control Directive Board Skeleton
-
-Use this persistent document when the final integrator needs to send conflict rulings, repair strategy, or resume instructions back to series coordinators. It is a downward instruction board, not a handoff inbox and not a second total-control document.
-
-```md
-# 总控指令
-
-## 1. 文档目的
-
-本文件记录最终整合者发给各系列协调者的当前有效指令。系列协调者每次接取 checkpoint、启动 subagent、从 heartbeat 醒来或恢复阻塞任务前，都必须先读取本文件。
-
-本文件只保存仍需执行或刚刚关闭的指令。稳定事实应回写到 `docs/系列提案-全周期总控.md`、`docs/并行任务登记.md` 或对应子提案；已关闭且已回写的详细指令可清理，避免形成第二套事实来源。
-
-## 2. 状态约定
-
-| 状态 | 含义 |
-| --- | --- |
-| ACTIVE | 总控已下发，相关角色必须先处理 |
-| ACKNOWLEDGED | 角色已确认收到，尚未完成 |
-| APPLIED | 角色已按指令完成修改或反馈，等待整合者关闭 |
-| SUPERSEDED | 被新指令替代 |
-| CLOSED | 稳定事实已回写，指令结束 |
-
-## 3. 执行规则
-
-1. 角色发现无法自动裁决的总控/授权/登记/契约冲突时，停止受影响工作，写交接报告，并按授权策略标记阻塞；只有本角色无其他未阻塞任务且总控指令是具体恢复条件时，才启用本线程 heartbeat。
-2. 最终整合者读取交接报告和权威文档后，在本文件创建或更新指令。
-3. 被点名角色在接取任何新任务前，必须先处理 `ACTIVE` 指令。
-4. 指令只给出修复策略和恢复条件，不替代 reviewer 审核，也不自动批准 checkpoint。
-5. 角色完成指令后，通过交接报告或本指令允许的反馈字段报告；最终整合者回写稳定事实后关闭或清理指令。
-
-## 4. 当前指令
-
-| ID | 状态 | 创建时间 | 来源 | 目标角色 | 目标 checkpoint | 涉及契约/文件 | 总控裁决 | 要求动作 | 允许写入范围 | 恢复条件 | 角色反馈/交接 | 关闭条件 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-
-## 5. 指令模板
-
-| INT-YYYYMMDD-NN | ACTIVE | YYYY-MM-DD HH:MM | 交接报告或冲突来源 | COORD-X | X0 | 契约/文件 | 裁决摘要 | 具体修复步骤 | 允许写入文件 | 达成后可恢复的条件 | 待角色填写或交接报告路径 | 总控/登记表已回写 |
-```
-
-## Handoff Inbox Pattern
-
-Use this pattern when multiple conversations or subagents need to report back to a final integrator through files.
-
-```md
-# 交接报告收件箱
-
-本目录只保存尚未整合的临时交接报告。整合者处理报告后，必须把稳定事实回写到 `docs/角色认领.md`、`docs/并行任务登记.md`、`docs/总控指令.md`、`docs/系列提案-全周期总控.md` 或对应子提案，然后删除或清空已处理报告。状态推进和清理应先读取 `docs/授权策略.md`。
-
-交接报告是证据包和临时记录，不是角色锁。未整合报告不阻止同一角色继续推进未阻塞工作，也不能单独作为 heartbeat blocker。若 `AGENT_REVIEW` 证据缺失，最终整合者应退回协调者部署 reviewer。
-
-持久文件：
-
-- `README.md`：说明规则和模板。
-
-临时文件：
-
-- `YYYYMMDD-HHMM-<role>-<checkpoint>.md`
-
-清理规则：
-
-- 已整合：删除临时报告。
-- 仍阻塞：把阻塞事实写入登记表；临时报告只保留到下一轮整合。
-- 需要用户决策：把问题写入登记表或总控的待决策区域；临时报告不作为长期依据。
-
-消化摘要规则：
-
-- 整合者不得把交接报告全文复制进登记表或总控。
-- 每份已处理报告只保留一条短摘要：角色/checkpoint、报告文件、处理时间、状态变化、变更范围、稳定事实、阻塞/指令、下一责任人。
-- reviewer 过程材料不长期保留；登记表只保留最小审查结论：reviewer、范围、结论、返工项、是否重审、解锁/阻塞影响。
-- 长细节留在对应子提案、git diff/commit 或源码中；登记表只保留恢复工作所需的最小事实。
-- 已处理报告在摘要和权威文档回写完成后删除或清空。
-```
-
-## Handoff Report Template
-
-```md
-# 交接报告：<role> / <checkpoint>
-
-状态：待整合
-角色：
-checkpoint：
-本轮目标：
-生成时间：
-
-## 1. 已完成修改
-
-- 修改文件：
-- 涉及章节：
-- 新增或调整的关键内容：
-
-## 2. Checkpoint 状态建议
-
-- 可进入 REVIEW：
-- 仍保持 DRAFT：
-- 建议 BLOCKED：
-- 理由：
-- 最小审查结论：
-
-## 3. 跨模块契约影响
-
-- 影响契约：
-- 涉及其他系列：
-- 是否需要总控统一定义：
-
-## 4. 发现的冲突
-
-- 与总控冲突：
-- 与其他子提案冲突：
-- 术语冲突：
-- 依赖冲突：
-
-## 5. 总控回写建议
-
-- 建议写入内容：
-- 原因：
-- 影响范围：
-
-## 6. 登记表建议
-
-- 建议状态变化：
-- 原因：
-
-## 7. 下一步建议
-
-- 需要继续的角色：
-- 需要用户决策的问题：
-- 具体恢复条件：
-- 是否只是等待交接被消化：
-
-## 8. 建议消化摘要
-
-- 一句话摘要：
-- 状态变化：
-- 必须登记的稳定事实：
-- 可删除的临时细节：
-```
-
-## Worker Prompt Pattern
-
-```text
-请使用 yefeng。工作目录是 <path>。
-
-你不是单独在工作区中工作：会有多个角色并行推进不同系列。你的唯一写入范围是：<scope>。
-不要修改总控、总控指令、并行登记、项目总览或代码，除非授权策略或本任务明确授权。
-
-先阅读：
-1. docs/授权策略.md
-2. docs/并行任务登记.md
-3. docs/总控指令.md
-4. docs/系列提案-全周期总控.md
-5. <your-series-doc>
-
-如果 `docs/总控指令.md` 中存在点名你的角色、checkpoint、写入范围或契约的 ACTIVE 指令，先按指令处理；处理不了就写交接报告并保持阻塞，不要继续新任务。
-
-任务：
-<specific assignment>
-
-完成后汇报：
-- 修改文件
-- 覆盖 checkpoint
-- 关键依赖
-- 冲突或阻塞
-- 总控回写建议
-- 如果项目启用了文件交接，请写入 docs/交接报告/YYYYMMDD-HHMM-<role>-<checkpoint>.md；该文件是临时收件箱内容，整合后会被清理。
-```
-
-## Self-Claiming Coordinator Prompt Pattern
-
-Use this as the minimal prompt for a new top-level conversation. It avoids manually assigning roles while still explicitly authorizing subagent delegation.
-
-```text
-请使用 yefeng。工作目录是 <path>。
-
-按项目已有的角色认领表自动认领一个 OPEN 角色并推进。若 `INTEGRATOR` 仍为 OPEN，先认领总控整合者；否则认领最高优先级的系列协调者。你是顶层执行对话，可以按 yefeng 约定部署 subagent 做边界清晰的子任务。
-
-先读取：
-1. docs/授权策略.md
-2. docs/角色认领.md
-3. docs/并行任务登记.md
-4. docs/总控指令.md
-5. docs/系列提案-全周期总控.md
-6. docs/交接报告/README.md
-7. 与你认领角色相关的系列提案
-
-认领后请报告：
-- 认领角色
-- role_instance_id
-- thread_id
-- branch / worktree（若有）
-- 写入范围
-- 禁止范围
-- 将部署哪些 subagent 或为什么暂不部署
-- 本线程 heartbeat 状态；主动执行时暂停/不启动，只有等待具体恢复条件且本角色无可推进任务时启用
-- 本轮 checkpoint
-- 是否存在点名本角色的 ACTIVE 总控指令；若存在，先处理该指令
-
-完成后把交接报告写入 docs/交接报告/，并只修改授权策略允许的文件。若授权策略允许 AGENT_REVIEW，创建 proposal 或实现后由当前协调者部署独立 reviewer subagent；通过后按策略推进状态、继续实现、合并或清理。交接报告未被消化本身不是阻塞或 heartbeat 理由。
-```
-
-## Heartbeat Prompt Pattern
-
-```text
-作为最终整合者，检查项目文档中的并行任务登记、总控和各系列提案。
-先读取 docs/授权策略.md，按授权策略决定是否可以自动推进 REVIEW、APPROVED、DONE、worktree 合并和清理。
-先读取 docs/角色认领.md，判断是否所有必需角色已认领；若已全部认领，报告“角色已认领完毕”。
-读取 docs/总控指令.md，检查是否有 ACTIVE/APPLIED/SUPERSEDED 指令需要下发、回写、关闭或清理。
-识别新进展、写入范围冲突、跨模块契约冲突、总控回写建议、可进入 REVIEW 的 checkpoint、应 BLOCKED 的 checkpoint。
-读取 docs/交接报告/ 中尚未处理的临时报告。只有授权策略允许且最小审查结论满足门槛时，才可推进 checkpoint 到 APPROVED/DONE 或执行合并/清理；若 AGENT_REVIEW 最小审查结论缺失，退回对应协调者部署 reviewer，不把最终整合者当作常规 reviewer。
-如发现总控、授权策略、登记表之间无法自动裁决的冲突，写入或更新 docs/总控指令.md，给出目标角色、修复策略、允许写入范围和恢复条件。
-如果已经被授权修改文件，请在把稳定事实回写到登记表或总控后，给每份已处理交接报告写一条短消化摘要，然后删除或清空已处理的交接报告，避免报告累计成第二套事实来源。
 ```

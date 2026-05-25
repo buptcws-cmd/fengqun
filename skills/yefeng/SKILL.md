@@ -1,127 +1,430 @@
 ---
 name: yefeng
-description: Convert a rough, ambitious, or ambiguous user vision into a governed series-proposal workflow with clarifying questions, final-architecture-vs-MVP choice, docs scaffolding, checkpoint planning, parallel task registration, lightweight status snapshots, subagent delegation rules, and heartbeat-style integration. Use when the user asks to create proposals, roadmap a large project, coordinate multiple series, run parallel conversations/subagents, build a total-control document, reduce yefeng startup context cost with a status snapshot, or turn an idea into a long-running governed development system.
+description: Use 野蜂 when a large project should be advanced by one total-control Codex thread that assigns roles, launches or resumes background Codex sessions, routes recorded communication, delegates subagents, reviews evidence, and integrates work through governed checkpoints.
 ---
 
-# Yefeng
+# 野蜂
 
-## Purpose
+野蜂 is a governed multi-Codex work system. The user talks to one total-control thread. That total-control thread assigns roles, starts and resumes background Codex role sessions, routes recorded communication, manages worktrees and branches, decides when blockers are cleared, and integrates reviewed work.
 
-Use this skill to turn a large fuzzy request into a durable operating system for work: clarify the user's intent, choose the right planning mode, create series proposals and governance docs, then support parallel execution without losing control of dependencies or shared contracts.
+Do not preserve the older self-claiming workflow. A top-level role session never claims a role by itself. It only accepts an explicit assignment from the total-control thread and verifies that the assignment exists in the project state.
 
-This skill is especially useful when the user says the project is a long-term personal system, toy, research effort, architecture-first build, or multi-module product. Do not assume MVP-first; ask.
+## Core Commitments
 
-## Core Workflow
+- The user interacts with the total-control thread by default.
+- The total-control thread is the only dispatcher for top-level roles.
+- Roles are assigned, not claimed.
+- Role sessions may communicate by writing recorded messages, but only the total-control thread may wake, resume, stop, replace, or reassign another top-level role.
+- Every top-level implementation role uses its own worktree and branch unless the total-control thread records a narrower read-only/document-only exception.
+- Role sessions may deploy worker and reviewer subagents inside their assigned scope.
+- Subagents do not own top-level 野蜂 roles and must report back to the role session that spawned them.
+- Cross-role facts, blockers, decisions, and evidence must be written to files. Hidden chat state is not governance.
+- Merge happens at the smallest verifiable integration point, not after every tiny action and not after unreviewed half-work.
+- The communication bus is dual-layer: machine-readable events plus human-readable views.
 
-### 1. Intake The Vision
+## Default Project Shape
 
-Read the local docs/code if present. Then ask only the few questions needed to choose the operating mode:
-
-- Is this for personal use, external users, research, production, or a client?
-- Is the priority fast MVP validation or final architecture first?
-- Should work happen in one conversation, multiple conversations, or via subagents?
-- Should git be initialized now, later, or not at all?
-- Who may modify the total-control document and the parallel task registry?
-- Which operation classes should be `AUTO`, `SCOPED`, `AGENT_REVIEW`, `ASK`, or `FORBID`?
-- Is a heartbeat/follow-up integrator wanted? If so, suggest a cadence.
-
-If the user signals "not time constrained", "personal toy", "I want it architected well", or "straight to final version", choose **final-architecture-first**. Treat any MVP as only a first runnable path, never as a feature ceiling.
-
-### 2. Establish Governance Before Implementation
-
-Before code implementation, create or update governance docs. Use names that fit the repo language; for Chinese projects these defaults work well:
+Create or maintain these files when a project uses 野蜂. Use local naming conventions if the repo already has equivalent docs, but migrate old self-claiming role docs into assignment semantics.
 
 - `docs/项目总览.md`
-- `docs/系列提案-全周期总控.md`
+- `docs/野蜂总控.md` or the repo's existing total-control document
 - `docs/授权策略.md`
-- `docs/角色认领.md` when multiple top-level conversations should self-assign roles
+- `docs/角色分配.md`
 - `docs/并行任务登记.md`
-- `docs/总控指令.md` when the final integrator must send conflict rulings or recovery instructions to roles
-- `docs/总控状态快照.md` when repeated yefeng starts would otherwise require rereading the full governance set
-- `docs/交接报告/` when parallel conversations need file-based handoff
-- One proposal doc per series, such as `docs/系列提案-数据与存储.md`
+- `docs/总控指令.md`
+- `docs/总控状态快照.md`
+- `docs/角色通信/README.md`
+- `docs/交接报告/README.md`
+- `.yefeng/state/roles.json`
+- `.yefeng/state/runs.json`
+- `.yefeng/events.jsonl`
+- `.yefeng/messages/`
+- `.yefeng/runs/`
 
-The total-control document owns:
+Runtime-heavy run logs under `.yefeng/runs/` should normally be ignored by git. Commit durable state, summaries, event lines, and handoff reports; keep full stdout/stderr/prompt logs as local evidence unless the project explicitly wants them versioned.
 
-- final capability map or MVP boundary;
-- checkpoint list and statuses;
-- cross-module dependencies;
-- write-scope rules;
-- approval gates;
-- conflict handling;
-- integration rules.
+Default `.gitignore` entries for 野蜂 projects should include:
 
-The authorization policy owns:
+```text
+.yefeng/runs/
+.yefeng/assignment.json
+.yefeng/outbox/
+```
 
-- which operations can run automatically;
-- which operations require subagent review before continuation;
-- which operations still require asking the user;
-- which scopes are allowed for file edits, worktrees, merges, cleanup, dependency installation, network use, secrets, and release actions;
-- who or what may move proposal checkpoints to `APPROVED`, implementation checkpoints to `DONE`, and worktree branches into the integration line.
+The shared `.yefeng/events.jsonl`, `.yefeng/state/*.json`, and human-readable docs should remain trackable. Per-run assignment manifests and role-local outbox files are runtime transport. If a project wants assignment manifests versioned for audit, copy a compact assignment summary into `.yefeng/state/runs.json` or another tracked state file instead of merging `.yefeng/assignment.json` from a role worktree.
 
-The parallel task registry owns:
+When upgrading an existing yefeng project:
 
-- task/checkpoint claims;
-- write scopes and forbidden scopes;
-- local series ownership;
-- review/integration tasks;
-- handoff notes.
+1. Convert any legacy self-claiming role document into `docs/角色分配.md`.
+2. Replace self-claiming language with total-control assignment language.
+3. Remove prompts that tell a new thread to choose an open role.
+4. Add session IDs, process/run IDs, worktree paths, branch names, blocker fields, and resume conditions to role state.
+5. Add the communication bus and require all cross-role questions to be recorded.
 
-The role-claim document owns:
+## Intake
 
-- the required final integrator role, `INTEGRATOR`, as priority 0;
-- the required coordinator roles;
-- whether each role is `OPEN`, `CLAIMED`, `ACTIVE`, `REPORT_READY`, `BLOCKED`, `STALE_CANDIDATE`, or `DONE`;
-- the `role_instance_id` / owner label for each role;
-- soft lease fields such as `last_seen`, `lease_expires_at`, and `heartbeat_status`;
-- the role's owned proposal file and write scope;
-- whether all required roles have been claimed.
+When the user asks to start or improve a large project, read local docs and code first. Ask only for missing decisions that materially affect safety or cost. Prefer defaults when the user has already granted broad automation authority.
 
-The control-directive document owns:
+Clarify only what is needed:
 
-- active instructions from the final integrator to affected roles;
-- conflict rulings that cannot be inferred safely from total-control, authorization, or registry docs alone;
-- affected roles, checkpoints, contracts, required actions, allowed write scopes, and resume conditions;
-- directive status such as `ACTIVE`, `ACKNOWLEDGED`, `APPLIED`, `SUPERSEDED`, or `CLOSED`.
+- desired end state and non-goals;
+- whether the work is personal, research, client, production, or public;
+- planning stance: final architecture first, MVP iteration, research exploration, or repair series;
+- maximum parallel top-level role sessions;
+- model/reasoning tier policy for total-control, role sessions, workers, and reviewers;
+- whether git should be initialized now;
+- whether every implementation role should use a worktree/branch, default yes;
+- what operations still require the user: secrets, external accounts, publication, destructive cleanup outside scope, or authority expansion.
 
-It is a downward coordination channel, not a second total-control document and not a place for long role reports.
+If the user indicates personal, long-term, architecture-sensitive, or not time-constrained work, choose final architecture first unless the user explicitly asks for a fast MVP.
 
-The handoff-report directory is only a temporary inbox. It stores reports that a final integrator has not processed yet; it must not become a second total-control document.
+## Authority
 
-The status snapshot owns only bootstrapping facts:
+The total-control thread owns orchestration by default:
 
-- latest known project mode, authority, active integrator, open roles, active directives, unprocessed handoffs, next safe checkpoints, and blocked implementation gates;
-- short pointers to authoritative docs, not full copied sections;
-- a freshness marker and the rule that authoritative docs win when stale or conflicting.
+- create, update, and stop role assignments;
+- launch `codex exec` role sessions;
+- resume role sessions by session ID;
+- create per-role worktrees and branches;
+- write the machine state, event log, role communication views, task registry, handoff reports, and control directives;
+- route cross-role messages;
+- decide whether a blocker condition is satisfied;
+- request or dispatch reviewer subagents when authorized;
+- merge reviewed role branches at verifiable integration points;
+- notify or resume affected roles after integration.
 
-It is a read-optimization layer, not an approval source, not a second registry, and not a replacement for checking active directives before work.
+Still require user confirmation for:
 
-Use `references/templates.md` when you need concrete document skeletons or registry tables.
+- expanding the authorization policy itself;
+- real secrets, external accounts, paid services, publication, cloud writes, or release actions;
+- destructive cleanup outside the recorded worktree/branch/run directories;
+- continuing despite a required reviewer failure;
+- conflicts that the recorded policy and total-control docs cannot adjudicate.
 
-### 3. Choose The Planning Mode
+Do not use `--dangerously-bypass-approvals-and-sandbox` for launched role sessions unless the authorization policy explicitly allows it for the project.
 
-Use one of these modes:
+## Role Assignment
 
-- **Final Architecture First**: Design the final system from the start; implement by dependency order. Use for personal toys, long-term systems, deep architecture work, or when the user rejects MVP cutting.
-- **MVP Iteration**: Define a smallest useful product and defer nonessential capabilities. Use only when the user wants fast delivery, external validation, deadline control, or constrained scope.
-- **Research Exploration**: Maintain open questions, experiments, and evidence. Use when the user is discovering the domain.
-- **Repair Series**: Turn an audit or bug set into checkpointed fixes. Use when the user has a list of issues to process.
+`docs/角色分配.md` is the human-readable assignment board. `.yefeng/state/roles.json` is the script-readable assignment state. Keep them in sync whenever the total-control thread changes role ownership or status.
 
-When in doubt, ask a direct question instead of silently choosing MVP.
+The authoritative assignment state lives in the total-control workspace. A role worktree usually contains only the committed baseline copy of `.yefeng/state/roles.json`, so it may be stale at launch time. Before starting a role, total-control must write a per-run assignment manifest, preferably:
 
-### 4. Create Series Proposals
+- in the total-control run directory: `.yefeng/runs/<role_id>/<run_id>/assignment.json`;
+- and in the role worktree when useful: `.yefeng/assignment.json`.
 
-Split the work into series tracks with disjoint ownership. Typical tracks:
+The launched role verifies the assignment manifest and prompt metadata. It should not fail merely because the committed role table inside its worktree still says `PLANNED`; it should report that discrepancy to total-control and avoid editing shared state directly.
 
-- Product and information architecture
-- Data and storage
-- Editor and versioning
-- AI orchestration and context
-- Knowledge base / graph / memory
-- Engineering and release
-- Quality and validation
+A role row should record:
 
-Every proposal document must include:
+- `role_id`
+- `role_name`
+- `assigned_by`
+- `assignment_id`
+- `session_id`
+- `process_id`
+- `run_id`
+- `state`
+- `worktree`
+- `branch`
+- `owned_scope`
+- `forbidden_scope`
+- `current_checkpoint`
+- `blocked_by`
+- `resume_when`
+- `required_evidence`
+- `wake_target`
+- `last_seen`
+- `lease_expires_at`
+- `last_output`
+
+Use these role states:
+
+- `PLANNED`: role exists but has not been assigned.
+- `ASSIGNED`: total-control has assigned the role but no active run is underway.
+- `RUNNING`: a role session process is active.
+- `WAITING_REVIEW`: role is waiting for its own reviewer result.
+- `BLOCKED`: role cannot continue until a recorded condition is satisfied.
+- `READY_TO_RESUME`: total-control has determined the blocker is cleared.
+- `REPORT_READY`: role has delivered evidence or handoff and has no immediately safe continuation.
+- `MERGE_READY`: role branch has required evidence and can be integrated by total-control.
+- `DONE`: role's current scope is complete.
+- `FAILED`: process failed or produced invalid output.
+- `EXPIRED`: lease passed or the process is dead and total-control may replace the role session.
+
+A role session must not:
+
+- assign itself a role;
+- change its own role identity;
+- take a second top-level role;
+- wake or resume another top-level role;
+- edit another role's worktree or branch;
+- edit total-control state except through fields explicitly assigned to that role;
+- treat a private chat answer as cross-role authority.
+
+## Process Backend
+
+Use `codex exec` as the default backend for background role sessions. The total-control thread may create helper scripts such as:
+
+- `scripts/yefeng/start.ps1`
+- `scripts/yefeng/launch-role.ps1`
+- `scripts/yefeng/resume-role.ps1`
+- `scripts/yefeng/poll.ps1`
+
+Prefer commands shaped like:
+
+```powershell
+Get-Content -LiteralPath <prompt-file> -Raw |
+  codex exec --json --skip-git-repo-check -C <role-worktree> -s <sandbox-mode> -o <control-root>\.yefeng\runs\<role_id>\<run_id>\last-message.md -
+```
+
+Resume only when a session ID is known:
+
+```powershell
+codex exec resume <session_id> "<resume prompt>"
+```
+
+In current Codex CLI, `codex exec resume` may not accept `-C`. Run the resume command with the process current directory set to the role's assigned worktree. If total-control resumes from the control root, the resumed role may correctly refuse to write because its sandbox writable root no longer matches its assignment. Always create the run log directory before launching a resume command so stdout/stderr redirection cannot fail before Codex starts.
+
+Do not pass interactive-only flags to `codex exec`. In particular, verify flags against `codex exec --help`; `-a/--ask-for-approval` may be accepted by interactive Codex but not by `codex exec`.
+
+Record stdout JSONL, stderr, process ID, run ID, last message path, prompt path, assignment manifest path, sandbox mode, started time, ended time, exit code, and discovered session ID under `.yefeng/runs/<role_id>/<run_id>/`.
+
+When `--json` is enabled, parse the first `thread.started` event and use its `thread_id` as the resumable session ID. Prefer JSON parsing over regex extraction. If no `thread.started` event appears, mark the run as non-resumable until proven otherwise.
+
+If a reliable session ID cannot be found, do not use broad `--last` in a shared Codex home. Either relaunch the role from recorded project state or isolate the role's `CODEX_HOME` so `--last` is unambiguous.
+
+When launching background helper processes on Windows, use `Start-Process` with `-WindowStyle Hidden` unless the user explicitly wants visible terminals. Prefer `pwsh` for helper scripts. If scripts must run under Windows PowerShell 5.1, keep script source ASCII-only or save it with a BOM; UTF-8-without-BOM scripts containing Chinese here-strings can fail before execution.
+
+Sandbox choice is part of the run record. On Windows, `-s workspace-write` may prevent spawned role sessions from using shell commands in some environments. If that happens and the authorization policy permits it, use a dedicated role worktree plus `-s danger-full-access` for that role run instead of using approval bypass flags. Record the reason and keep the write scope constrained by prompt, worktree, branch, and review gates.
+
+Before launching the first implementation role on Windows, total-control should run a tiny sandbox probe in a disposable directory:
+
+1. `codex exec --json -s workspace-write` with a prompt that asks the role to run a simple shell command such as printing the current directory.
+2. If the JSONL or final message shows `CreateProcessAsUserW failed: 5`, mark `workspace-write-shell=false` in `.yefeng/state/runs.json` or the status snapshot.
+3. For role sessions that need tests, builds, git commands, dependency inspection, or other shell work, launch them with `-s danger-full-access` inside their dedicated worktree, not in the project root.
+4. Keep read-only or document-only role sessions on the stricter sandbox when they do not need shell commands.
+
+This is a workaround for the Windows sandbox process-launch layer, not a relaxation of 野蜂 governance. The effective safety boundary becomes the dedicated worktree, narrow prompt scope, ignored runtime transport files, reviewer gate, and total-control integration review.
+
+App-server or remote-control tooling can be explored as an implementation backend, but 野蜂 must not depend on experimental desktop-thread visibility. Background CLI sessions are sufficient.
+
+## Worktrees And Integration
+
+Every top-level implementation role should have its own worktree and branch. Use conservative names such as:
+
+```text
+worktrees/<role_id>
+codex/yefeng/<role_id>/<checkpoint-or-date>
+```
+
+Document-only planning roles may share the main workspace only when the total-control thread records that their write scopes do not conflict.
+
+Role sessions work toward the smallest verifiable integration point:
+
+1. implement or update the assigned scope;
+2. run focused validation;
+3. deploy a reviewer subagent when required;
+4. fix reviewer findings and re-review when needed;
+5. write a handoff report or role result;
+6. mark the checkpoint `MERGE_READY` only when evidence exists;
+7. wait for total-control integration or continue a safe same-role task if one exists.
+
+The total-control thread integrates:
+
+1. inspect role diff and evidence;
+2. verify reviewer conclusion exists when required;
+3. check communication bus for unresolved blockers;
+4. remove or exclude runtime transport files such as `.yefeng/assignment.json` and `.yefeng/outbox/**` from the role branch unless explicitly archived;
+5. merge or rebase the role branch into the integration line;
+6. run integration validation;
+7. write stable facts to the registry and total-control doc;
+8. emit a `BASELINE_UPDATED` event;
+9. update affected role worktrees with the new baseline, then resume from each role's own worktree if they need to continue.
+
+Do not merge unreviewed half-work merely to keep other roles current. Do not hold a complete reviewed unit indefinitely when it is already safe to integrate.
+
+## Communication Bus
+
+All cross-role communication goes through the recorded bus.
+
+Shared machine-readable source in the total-control workspace:
+
+- `.yefeng/events.jsonl`
+- `.yefeng/messages/<message_id>.json`
+
+Human-readable views:
+
+- `docs/角色通信/README.md`
+- `docs/角色通信/<role_id>.inbox.md`
+- `docs/角色通信/<role_id>.outbox.md`
+- `docs/角色通信/总控路由.md`
+
+A role may write a message event addressed to another role or to total-control. It may not resume the target role. Total-control routes the message and decides whether to:
+
+- answer directly;
+- append the message to a target inbox without waking the target;
+- resume the target role with the message;
+- convert the message into a blocker;
+- create or update a control directive;
+- ask the user.
+
+For implementation roles running in separate worktrees, prefer a local outbox:
+
+- role writes `.yefeng/outbox/<message_id>.json` inside its worktree;
+- total-control imports that outbox into the shared `.yefeng/events.jsonl` and human-readable route views;
+- total-control marks imported messages as routed, blocking, closed, or ready to wake a target role.
+
+After import, do not merge role-local `.yefeng/outbox/` files into the integration branch unless the project explicitly archives transport messages in git. The durable record is the imported event line and route view. This avoids re-importing stale transport files later.
+
+This avoids concurrent writes to the shared event log and prevents worktree-local copies of shared state from becoming false authority. Direct writes to the shared bus are allowed only when total-control explicitly grants a shared writable directory and serialization/locking is handled.
+
+Use these message types:
+
+- `QUESTION`
+- `ANSWER`
+- `BLOCKER`
+- `CONTRACT_CHANGE`
+- `REVIEW_REQUEST`
+- `REVIEW_RESULT`
+- `HANDOFF`
+- `BASELINE_UPDATED`
+- `RESUME_NOTICE`
+- `USER_DECISION_REQUIRED`
+- `DIRECTIVE`
+
+Every blocking message must include:
+
+- `blocking: true`
+- `blocked_role`
+- `blocked_checkpoint`
+- `blocked_by`
+- `resume_when`
+- `required_evidence`
+- `wake_target`
+
+The total-control thread is responsible for closing routed messages after the stable fact has been written to the registry, directive board, total-control doc, or role assignment state.
+
+## Control Directives
+
+`docs/总控指令.md` is the downward instruction channel from total-control to role sessions.
+
+Use a directive when:
+
+- a role needs a conflict ruling;
+- a cross-role contract changed;
+- a blocker is cleared but the role must resume in a specific way;
+- a role must stop, rebase, repair, or re-run validation;
+- a reviewer gate or merge gate failed and a concrete repair path exists.
+
+Directives do not replace authorization or reviewer gates. They tell a role what to do next and what evidence is required.
+
+## Status Snapshot
+
+`docs/总控状态快照.md` is a short startup map for the total-control thread and role sessions. It should include:
+
+- last updated time and updater;
+- current planning stance;
+- active total-control session;
+- role assignment summary;
+- running, blocked, ready-to-resume, merge-ready, and done roles;
+- open messages and blocking messages;
+- active directives;
+- unprocessed handoff reports;
+- latest integration baseline;
+- next safe total-control actions;
+- docs that must be read before changing state.
+
+The snapshot is not an approval source. If it conflicts with role assignment, registry, directives, event log, reviewer evidence, or authorization policy, trust the authoritative source and refresh the snapshot.
+
+## Launching Role Sessions
+
+Before launching roles, total-control should:
+
+1. read authorization, role assignment, task registry, directives, status snapshot, and event log tail;
+2. choose the next safe set of roles within max parallelism;
+3. create worktrees and branches for implementation roles;
+4. write assignment state;
+5. create role prompts;
+6. start role sessions;
+7. record run metadata;
+8. add `ROLE_ASSIGNED` and `ROLE_STARTED` events;
+9. report a concise launch summary to the user.
+
+An assigned role prompt must state:
+
+- this role was assigned by total-control;
+- the role must not self-claim or reassign roles;
+- role ID, assignment ID, run ID, assignment manifest path, and session metadata if known;
+- working directory, worktree, and branch;
+- allowed and forbidden write scopes;
+- current checkpoint;
+- files to read first;
+- communication bus rules, including whether the role writes local outbox or shared bus;
+- blocker reporting format;
+- subagent delegation allowance and reviewer requirement;
+- expected final output and handoff path.
+
+## Resuming Role Sessions
+
+Total-control resumes a role when:
+
+- `resume_when` is satisfied;
+- a routed message requires the role's answer;
+- a directive targets the role;
+- baseline changed and the role must rebase/pull;
+- reviewer output arrived;
+- the user instructs total-control to continue work.
+
+Before resuming:
+
+1. verify the role is still assigned to the recorded session;
+2. ensure no newer run is active for the same role;
+3. read relevant events, messages, directives, and registry rows;
+4. update state to `READY_TO_RESUME`;
+5. send a concise resume prompt with the exact reason and required next output.
+
+If the previous session is not resumable, total-control may replace it by assigning a new session and recording the previous one as `EXPIRED` or `FAILED`.
+
+## Subagents
+
+Role sessions may deploy subagents for bounded work:
+
+- workers for implementation, exploration, focused docs, tests, or validation;
+- reviewers for proposal, implementation, integration-risk, or contract checks.
+
+Rules:
+
+- A role session owns its subagents and integrates their output.
+- Subagents must stay inside the role's assigned scope.
+- A reviewer must be independent from the worker or author it reviews.
+- A failed review leads to repair and re-review unless the failure needs a missing dependency, cross-role decision, policy expansion, or user decision.
+- Do not preserve long transcripts in governance docs. Keep minimal conclusions: reviewer, scope, verdict, required fixes, re-review status, and unlock/block effect.
+
+Risk tier guidance:
+
+- highest: total-control integration, architecture, authorization, security, merge decisions, hard root-cause debugging;
+- high: shared implementation, migrations, editor/version/AI logic, nontrivial refactors, key reviewers;
+- medium: bounded implementation, tests, local validation, focused docs;
+- economy: mechanical search, formatting, inventory, low-risk summaries.
+
+When unsure, choose the higher tier.
+
+## Governance Before Implementation
+
+Do not start implementation before the 野蜂 governance layer exists unless the user explicitly asks for a one-off change.
+
+At minimum, create:
+
+- total-control doc;
+- authorization policy;
+- role assignment board;
+- task registry;
+- communication bus;
+- directive board;
+- handoff inbox;
+- status snapshot when repeated startup would otherwise be expensive.
+
+Every proposal should include:
 
 ```md
 状态：
@@ -135,374 +438,79 @@ Every proposal document must include:
 验证方式：
 ```
 
-Keep proposal states conservative: `DRAFT` until reviewed. Do not mark `APPROVED` just because the document exists.
+Keep proposals conservative. A proposal is `DRAFT` until it has been reviewed under the authorization policy.
 
-### 5. Create Authorization Policy
+## Running Total-Control
 
-When creating a series proposal system, define permissions up front instead of asking repeatedly during execution. Create or update an authorization policy such as `docs/授权策略.md`.
+When acting as the total-control thread:
 
-Use these authorization modes:
+1. read the status snapshot first when present;
+2. read authorization, role assignment, task registry, directives, communication route view, event log tail, and unprocessed handoffs;
+3. process completed role runs;
+4. route messages;
+5. detect blockers that are cleared;
+6. resume roles whose conditions are satisfied;
+7. launch new roles if capacity remains;
+8. integrate merge-ready work with evidence;
+9. update docs and machine state;
+10. refresh the status snapshot;
+11. tell the user what changed and what is still blocked.
 
-- `AUTO`: execute without asking when the task is in scope.
-- `SCOPED`: execute automatically only within the listed files, directories, branches, worktrees, tools, or command classes.
-- `AGENT_REVIEW`: execute or advance only after an independent reviewer subagent approves the proposal, implementation, merge, or cleanup evidence.
-- `ASK`: ask the user before executing.
-- `FORBID`: do not execute.
+If authorized work is ready, do it. Do not merely suggest a future action when the total-control thread has enough evidence and authority to execute it.
 
-Review authority is part of the authorization policy. `ASK` or a manual-review gate means the user may review directly or name a reviewer. `AGENT_REVIEW` means the user has delegated that gate to the conversation: the current coordinator deploys an independent reviewer subagent for its own proposal, worker output, implementation, merge, or cleanup evidence. The final integrator is not the routine reviewer for coordinator work; it integrates reviewer-passed evidence, checks that evidence exists, records state, and handles conflicts.
+## Running A Role Session
 
-The policy should cover at least:
+When the prompt assigns a top-level role:
 
-- editing proposal docs, total-control docs, role claims, task registry, and handoff reports;
-- spawning subagents and reviewer subagents;
-- proposal review and moving checkpoints to `APPROVED`;
-- implementation review and moving checkpoints to `DONE`;
-- git init, branch/worktree creation, merge, cleanup, and baseline commits;
-- dependency install, code generation, tests, lint, build, format, and local app startup;
-- OpenSpec proposal creation, review, apply, archive, and spec updates when the repo uses OpenSpec;
-- destructive filesystem cleanup, external network, real API keys, cloud sync, publishing, and release actions.
+1. verify the assignment from the prompt and per-run assignment manifest; treat worktree-local `docs/角色分配.md` or `.yefeng/state/roles.json` as possibly stale unless total-control says the worktree was refreshed after assignment;
+2. read authorization, total-control doc, task registry, directives, communication inbox, relevant proposal, and recent events;
+3. write only allowed role-local progress, handoff, and outbox files; shared state is updated by total-control unless the assignment explicitly grants a serialized shared state writer;
+4. process active directives or messages for this role before new work;
+5. deploy subagents when useful and allowed;
+6. perform the assigned checkpoint inside the role's worktree/scope;
+7. validate;
+8. obtain reviewer evidence when required;
+9. write handoff/report/message events;
+10. finish with a concise state update for total-control.
 
-If the user grants broad authority, encode it in the policy as `AUTO`, `SCOPED`, or `AGENT_REVIEW` rather than keeping it as chat-only permission. If the user does not grant broad authority, default risky operations to `ASK`.
-
-In highly automated projects, prefer this gate:
-
-```text
-Proposal created -> reviewer subagent checks proposal -> if pass and policy allows AGENT_REVIEW, checkpoint may become APPROVED -> coordinator starts implementation.
-Implementation complete -> reviewer subagent checks tests/evidence/diff -> if pass and policy allows AGENT_REVIEW, checkpoint may become DONE and worktree may merge.
-```
-
-The user is only required for operations marked `ASK`, policy changes that expand authority, conflicts that the policy cannot resolve, secrets/credentials not already provisioned, irreversible external publication, or destructive actions outside the declared scope.
-
-### 6. Self-Claim Roles
-
-When a yefeng project already has governance docs and the user asks a new conversation to "use yefeng" or "advance according to the yefeng workflow" without naming a role, the conversation should not ask the user to assign one by hand.
-
-Every multi-conversation yefeng project must include exactly one final integrator role:
-
-- `INTEGRATOR` is priority 0 and must be claimed or active before series coordinator roles proceed.
-- If no `INTEGRATOR` is `CLAIMED` or `ACTIVE`, the next eligible execution conversation claims `INTEGRATOR` first.
-- If `INTEGRATOR` is already `CLAIMED` or `ACTIVE`, new conversations skip it and claim the highest-priority eligible series coordinator role.
-- If the current conversation is only designing or updating the workflow/skill and is not acting as an execution line, do not claim `INTEGRATOR`; update the rule and tell the user that execution should start with an integrator claim.
-- There must not be two active integrators. A duplicate integrator claim is a `COLLISION` and must stop until resolved.
-
-Instead:
-
-1. If a status snapshot such as `docs/总控状态快照.md` exists, read it first to orient cheaply. Then read the authorization policy, role-claim document, task registry, control-directive document, and any snapshot-listed authoritative docs needed for the next action. If the snapshot is missing, stale, or conflicts with authoritative docs, ignore the conflicting snapshot facts and refresh it after the authoritative read.
-2. If the role-claim document does not exist and the user is setting up multi-conversation work, create it from the template before starting parallel work.
-3. Ensure the role-claim document contains an `INTEGRATOR` row at priority 0. Add it if missing.
-4. If `INTEGRATOR` is `OPEN` and this is an execution conversation, claim `INTEGRATOR` before any series role.
-5. Read the current conversation identity before claiming. Prefer the environment variable `CODEX_THREAD_ID`; if it is unavailable, generate and persist a UUID fallback.
-6. Enforce **one top-level thread, one top-level role**. If this thread identity already owns a non-`DONE` role in the role-claim document, resume or wait on that role. Do not claim a second coordinator role just because another role has unblocked work.
-7. Otherwise pick the highest-priority eligible `OPEN` series coordinator role whose write scope does not conflict with `CLAIMED` or `ACTIVE` work.
-8. Generate a unique `role_instance_id` from the role and thread identity, then claim that role by updating the role-claim document with the instance ID, full thread ID, timestamp, intended checkpoint, write scope, and any implementation worktree/branch if one exists.
-9. Set or refresh the role's soft lease fields. Active work should normally use a generous lease, such as `now + 4h`, and waiting or blocked work should use the heartbeat cadence from the authorization policy.
-10. Re-read the role-claim document after writing. If another conversation claimed the same role first, mark or report the collision and choose another `OPEN` role only if this thread still owns no other non-`DONE` role.
-11. Treat expired leases as `STALE_CANDIDATE`, not as automatic release. A stale candidate may be taken over only when the authorization policy, final integrator, or user allows it and there is no recent progress, handoff, heartbeat, commit, or status update from the claimant.
-12. If the authorization policy allows heartbeat automation, create or update a thread-local heartbeat for this role when waiting or blocked. Do not create a shared role-heartbeat document; a heartbeat can only wake its own thread.
-13. Announce the claimed role, owned files, forbidden files, immediate checkpoint, lease/heartbeat status, and next refresh condition.
-14. If `INTEGRATOR` and all required coordinator roles are no longer `OPEN`, report that role claiming is complete and list the owners.
-
-Before starting any checkpoint or subtask, the coordinator must check the control-directive document. If an `ACTIVE` directive targets its role, checkpoint, write scope, or contract, follow that directive before claiming new work.
-
-Top-level execution conversations are either the **final integrator** or **series coordinators**, not just direct workers. The final integrator owns shared coordination, conflict directives, task digestion, and total-control updates. A series coordinator plans the role's work, delegates bounded subwork where allowed, reviews subagent output, updates its owned proposal or handoff report, and submits total-control writeback suggestions.
-
-A top-level execution conversation must not be both a final integrator and a series coordinator, or two different series coordinators, at the same time. Worker and reviewer subagents do not count as top-level role owners; they are delegated by the current role and must stay inside that role's task scope.
-
-Role ownership labels must be unambiguous. Do not use labels like "this conversation" or "current chat" as owners. Use the conversation's self-visible thread identity as the primary cross-conversation differentiator.
-
-Identity rule:
-
-- Prefer `CODEX_THREAD_ID` when the local environment exposes it.
-- If no thread ID is available, generate a UUID once and immediately write it into the role-claim document; do not regenerate it later.
-- Treat worktree, branch, and proposal slug as scope or implementation-isolation metadata, not as part of conversation identity.
-
-Use a stable role instance ID:
+If blocked, the role must write:
 
 ```text
-<ROLE_ID>@thread-<thread_id_or_uuid>
+blocked_by:
+resume_when:
+required_evidence:
+wake_target:
+safe_same_role_work_available: yes/no
 ```
 
-Examples:
-
-- `INTEGRATOR@thread-019e4a8c-1bf9-7ca2-8b6d-984aa15e98cf`
-- `COORD-P@thread-019e4b19-4109-7250-b682-8afa4bfe75b2`
-- `COORD-D@thread-019e4c20-8a77-7000-9123-example000001`
-
-Use the full thread ID in the `role_instance_id` when practical; if a display-shortened owner is used, the full `thread_id` must be recorded in a separate field. When a role creates a branch or worktree, record the exact branch and worktree path in the task registry or handoff report, but do not use it to distinguish conversations. Shared docs such as the role-claim board, task registry, control directives, and handoff inbox still live on the main line so every conversation can read coordination state.
-
-If an old role row has an owner such as "this conversation", "current thread", or lacks a thread ID, the owning role must refresh its row with `CODEX_THREAD_ID` before taking new work.
-
-Lease rule:
-
-- A role lease is a recovery signal, not a hard lock timeout.
-- Refresh `last_seen` and `lease_expires_at` when claiming, starting or resuming active work, dispatching a worker or reviewer, starting a long command, finishing a long command, writing a handoff, changing blocker state, or entering heartbeat wait.
-- Do not let a background heartbeat interrupt active execution just to renew the lease. Active threads should renew at natural progress checkpoints and choose a long enough lease for the task.
-- Mark a role `STALE_CANDIDATE` only after its soft lease has expired and there is no recent evidence of progress. Do not release or reassign it automatically.
-- The final integrator can clear a stale candidate, extend its lease, or authorize takeover only after checking handoffs, task registry rows, recent git activity, active directives, and the authorization policy.
-
-Use subagents when the current user request or the authorization policy allows subagents, delegation, or parallel agent work. If both are absent, the coordinator should work locally and say that subagent delegation is ready but needs authorization.
-
-#### Coordinator execution loop
-
-A series coordinator is responsible for forward motion inside its owned scope, not only for producing one handoff report. When authorization allows subagents:
-
-1. Before active work begins or resumes, pause the role heartbeat if one exists. Heartbeats are for waiting or blocked states, not for work already being executed in the current thread.
-2. Refresh the role's soft lease before meaningful active work. If the task may run long, extend the active lease generously rather than scheduling a heartbeat that will interrupt active work.
-3. Pick the next eligible unblocked task in the role's scope. A task is blocked only when a declared dependency is unmet, an `ACTIVE` control directive applies, write scopes conflict, authorization requires `ASK`, reviewer failure cannot be repaired locally, or another external condition is genuinely missing.
-4. Decompose execution into bounded worker subagent tasks when that materially advances the role. Give each worker a clear write/read scope and remind it that it is not alone in the workspace.
-5. Refresh the role lease before and after dispatching worker or reviewer subagents, before long commands, and after long commands complete.
-6. After a worker, coordinator, or implementation subtask produces a proposal, patch, report, or implementation output that needs acceptance, follow the authorization gate. If it is `AGENT_REVIEW`, deploy an independent reviewer subagent from the current coordinator thread; if it is `ASK`, stop for user/manual review. The reviewer must not be the same agent that produced the work.
-7. If the reviewer fails, repair within the role's allowed scope and redeploy a reviewer. Do not mark the task `BLOCKED` merely because the first review failed.
-8. If a review task such as `REV-*` is open and directly matches the coordinator's current scope, the coordinator may deploy a read-only reviewer subagent even when the final integrator owns registry writes. The minimal review conclusion can be attached to the role handoff or a new handoff report for integrator integration.
-9. After each reviewed task, record the minimal review conclusion needed for later state movement, then check for the next eligible unblocked task in the same role or series. Continue only inside the current top-level role.
-10. Mark the role `REPORT_READY` / `BLOCKED` and activate or refresh that role's heartbeat only when there is no unblocked task the role can safely advance and there is a concrete same-role resume condition, such as reviewer output, a declared upstream dependency, another role's required result, an `ACTIVE` control directive, or a user/manual-review decision. Do not activate heartbeat merely because a handoff report has not been processed.
-
-An unprocessed handoff is not by itself a blocker. Use handoff reports to inform the integrator while continuing local, non-conflicting work in the same role. If only other roles have unblocked work, this thread waits only when its own role has a concrete resume condition; a new top-level conversation should claim those other roles.
-
-### 7. Parallelize Safely
-
-If the user explicitly authorizes subagents or multiple conversations, or the authorization policy already allows them:
-
-- Give each coordinator role one owned proposal file or disjoint directory.
-- Let coordinators decompose work into bounded subagent tasks with disjoint read/write scopes.
-- After delegated work completes, route the result through an independent reviewer subagent before treating it as approved, done, mergeable, or ready to unblock later work.
-- Tell each worker it is not alone in the workspace.
-- Forbid workers from changing total-control and registry docs unless explicitly assigned.
-- Forbid subagents from changing the role-claim document, total-control document, or task registry unless explicitly assigned; they report back to their coordinator.
-- Have coordinators report changed files, covered checkpoints, key dependencies, and total-control update suggestions.
-- Use a final integrator to integrate reviewer-passed evidence, review conflicts, and update shared docs.
-
-For multi-conversation workflows, use this governance model:
-
-- Each series coordinator maintains its own proposal and local notes.
-- The main registry is visible to all lines.
-- The control-directive document is visible to all lines and carries final-integrator instructions back to affected roles.
-- A final integrator modifies total-control and global registry.
-- Series coordinators submit "total-control writeback suggestions"; they do not directly change shared cross-contracts.
-
-If a coordinator finds a conflict that cannot be resolved from the total-control document, authorization policy, task registry, and current control directives, it must stop the affected work, write a handoff report, and mark the role or checkpoint blocked where policy allows. It activates its thread-local heartbeat only when there is no other unblocked task in the same role and the missing final-integrator directive is the concrete resume condition.
-
-### 8. Use Handoff Documents
-
-For multi-conversation workflows, prefer a shared handoff inbox when chat-only copying becomes fragile. Use a project-local directory such as `docs/交接报告/`.
-
-Each series coordinator may create or update exactly one handoff report for its current assignment, using a clear filename such as:
-
-```text
-YYYYMMDD-HHMM-<role>-<checkpoint>.md
-```
-
-A handoff report is an evidence packet and temporary coordination record, not a lock on the role. An unprocessed handoff does not block the same coordinator from continuing unblocked same-role work and does not justify heartbeat without a concrete resume condition.
-
-A handoff report should include:
-
-- role and checkpoint;
-- files changed;
-- checkpoints covered;
-- status suggestions, such as `REVIEW_REQUESTED`, `REVIEW`, or `BLOCKED`;
-- cross-module contract impacts;
-- conflicts found;
-- total-control writeback suggestions;
-- registry update suggestions;
-- unresolved user decisions.
-
-After the final integrator processes a handoff report:
-
-- stable facts must be written into the task registry, total-control document, or relevant proposal;
-- unresolved blockers must be registered in the task registry;
-- a concise handoff digest must be recorded in the registry, directive board, or total-control change log;
-- any reviewer result should be reduced to the minimum durable conclusion: reviewer identity, reviewed scope, verdict, required fixes, whether fixes were re-reviewed, and what the verdict unlocks or keeps blocked;
-- the processed handoff report must be deleted or cleared;
-- only the persistent `README` or template remains in the handoff directory.
-
-Use digestion, not copying. The final integrator should extract only durable coordination facts:
-
-- role, checkpoint, report file, processed time;
-- changed files or scopes;
-- status delta;
-- stable decisions or facts, capped to a short summary;
-- blockers or control directives opened;
-- reviewer conclusion if relevant, summarized rather than copied;
-- next owner or resume condition.
-
-Do not paste long report bodies, reviewer transcripts, or process logs into the registry or total-control document. Reviewer findings are process material when they have been fixed and re-reviewed; preserve the minimal conclusion and status effect, not the full transcript. If detail is needed later, rely on git history, diff summaries, or the affected proposal document. Do not let old handoff reports accumulate. The handoff directory is an inbox, not an archive.
-
-### 9. Use Control Directives
-
-Use a project-local control-directive document such as `docs/总控指令.md` as the persistent channel from the final integrator back to series coordinators.
-
-Each directive should include:
-
-- directive ID and status;
-- source conflict or handoff report;
-- affected roles, checkpoints, contracts, and files;
-- final-integrator decision;
-- required repair or alignment steps;
-- allowed write scope;
-- resume condition;
-- expected role feedback or handoff report;
-- close condition.
-
-Lifecycle:
-
-1. A role detects a conflict that cannot be automatically adjudicated. It stops the affected work, writes a handoff report, and marks itself or the task blocked if policy allows. It activates its heartbeat only if there is no other unblocked task in the same role and a final-integrator directive is the concrete resume condition.
-2. The final integrator reads the handoff report and authoritative docs, then writes or updates a directive with the repair strategy and resume condition.
-3. The affected role's next normal turn or heartbeat wake reads the directive before taking any new task.
-4. If the directive unblocks the role, the role pauses its heartbeat, applies the required repair inside its allowed scope, and writes feedback through a handoff report or the allowed acknowledgement field.
-5. The final integrator closes or supersedes the directive after stable facts are written back to the total-control document, registry, or proposal docs.
-
-Directives do not replace authorization or reviewer gates. A directive can tell a role how to repair or resume; it cannot by itself approve a checkpoint, mark implementation `DONE`, or merge work unless the authorization policy and minimal review conclusion also allow that action.
-
-### 10. Integrate And Review
-
-After proposals are created or updated:
-
-- Process any unprocessed handoff reports first, then clean them up after stable facts have been folded into the authoritative docs.
-- Process active control directives and close only those whose stable facts have been folded into the authoritative docs.
-- Read the authorization policy before deciding whether review, approval, merge, cleanup, or continuation needs a user question.
-- Check required headers.
-- Search for old assumptions, especially accidental MVP ceilings in final-architecture-first projects.
-- Identify conflicting terms and shared contracts.
-- Update the total-control document only with stable coordination facts.
-- Move tasks to `REVIEW`, `APPROVED`, `DONE`, or merge-ready only through the authorization policy and agreed review evidence, not by instinct.
-- Refresh the status snapshot after durable changes to roles, task states, active directives, handoff inbox, approval gates, or next safe checkpoints.
-
-When policy allows `AGENT_REVIEW`, use an independent reviewer subagent as the approval gate. The reviewer must not be the same agent that produced the proposal or implementation. The coordinator that owns the work deploys this reviewer unless the task is explicitly an integration-owned review. A passing minimal review conclusion may authorize the coordinator or final integrator to advance the checkpoint without asking the user.
-
-The final integrator's normal review duty is evidence and state integration: verify that the required reviewer gate happened, check conflicts, fold stable facts into shared docs, and issue directives when needed. The durable record may be a short reviewer conclusion rather than the full reviewer transcript, as long as it names the reviewer, reviewed scope, verdict, required fixes, re-review status, and unlock/block effect. If even that minimum evidence is missing under `AGENT_REVIEW`, return the work to the coordinator to deploy a reviewer instead of using the final integrator as the default reviewer.
-
-If the reviewer returns "fail" or "needs changes", the coordinator should repair the identified issues and redeploy an independent reviewer. Do not ask the user or mark the checkpoint `BLOCKED` just because the first review failed. Use `BLOCKED` only when the fix requires a missing dependency, cross-role contract decision, authorization outside policy, or the coordinator wants to proceed despite a failing review.
-
-Recommended review lanes:
-
-- Product + validation review
-- Data + editor + version + AI contract review
-- Knowledge graph + AI + version review
-- Engineering + quality + safety review
-- Terminology / total-control integration
-
-### 11. Heartbeat Integration
-
-Use heartbeat automation when the user asks for periodic integration or the authorization policy grants heartbeat automation. For high-frequency Codex-driven work, suggest 15-20 minutes; for quiet waiting states, hourly or daily is enough. Do not use heartbeat just to renew an active role lease while the same thread is already working; active work should refresh its lease at natural progress checkpoints.
-
-There are two heartbeat levels:
-
-- **Final integrator heartbeat**: checks all roles, shared docs, handoff reports, conflicts, and global status.
-- **Role coordinator heartbeat**: checks one role's blockers, dependencies, minimal review conclusions, handoff status, and next unblocked checkpoint.
-
-All coordinator roles should use a thread-local heartbeat when the policy allows it and when the role is waiting or blocked. Lifecycle:
-
-1. After claiming a role, create a heartbeat for the current thread if the role may need to wake later.
-2. When actively executing work in the current thread, pause or do not schedule the heartbeat so it does not wake redundantly. This includes active proposal work, worker coordination, reviewer deployment, reviewer repair loops, and local handoff writing.
-3. When blocked or waiting for a concrete same-role resume condition, activate the heartbeat only if there is no other unblocked task in the role's scope that can be advanced safely. Valid resume conditions include reviewer output, an upstream dependency, another role's required result, an `ACTIVE` control directive, or a user/manual-review decision. Do not activate a role heartbeat merely because a handoff report is unprocessed.
-4. On heartbeat wake, re-read authorization policy, role claim, task registry, total-control, handoff inbox, and the owned proposal.
-5. Read active control directives before taking any new checkpoint; if a directive targets this role, apply it first.
-6. If unblocked, pause the heartbeat, refresh the role lease for active work, and continue work inside the same role, including delegating the next eligible task in that role if one exists.
-7. If still blocked, report the current blocker, refresh `last_seen` and the waiting lease, and do not duplicate work.
-8. When the role reaches `DONE` and has no active or waiting checkpoint, delete or stop the heartbeat.
-
-A final integrator heartbeat should inspect:
-
-- status snapshot first, when present, to reduce startup context;
-- role-claim document;
-- authorization policy;
-- task registry;
-- control-directive document;
-- total-control document;
-- series proposal docs;
-- unprocessed handoff reports;
-- new writeback suggestions;
-- write-scope conflicts;
-- cross-contract changes;
-- checkpoints ready for review, approval, implementation, merge, or cleanup under the authorization policy;
-- checkpoints that should be blocked.
-
-The heartbeat may report suggestions automatically. It may approve checkpoints or merge/cleanup work only when the authorization policy explicitly allows that path and required minimal review conclusion is present.
-
-When authorized to modify files, a heartbeat integrator may clean processed handoff reports after recording stable facts in the registry or total-control document. Without that authority, it should report which handoff files are safe to clear.
-
-After processing reports, directives, or status changes, the final integrator should update the status snapshot with only compact durable facts and pointers. Do not paste long handoff bodies, reviewer transcripts, or proposal text into the snapshot.
-
-A role coordinator heartbeat should inspect:
-
-- status snapshot first, when present, to identify likely blockers and next documents to read;
-- its own role row;
-- its owned proposal;
-- relevant task registry rows;
-- active control directives for its role, checkpoint, write scope, or contract;
-- relevant handoff report;
-- reviewer subagent minimal conclusions or missing reviewer gate evidence;
-- upstream dependency checkpoints;
-- authorization policy changes.
-- lease fields for the current role, including whether it is merely waiting, active, or a stale candidate.
-
-It should not update unrelated roles or global docs unless the authorization policy explicitly allows it.
-
-### 12. Maintain Status Snapshot
-
-Use a project-local status snapshot such as `docs/总控状态快照.md` to reduce repeated startup cost in mature yefeng projects.
-
-Create the snapshot when governance docs exist and repeated role starts, heartbeats, or integration turns would otherwise reread the full total-control stack. Keep it short enough to load cheaply.
-
-The snapshot should include:
-
-- freshness: updated time, updater role/thread, source docs checked;
-- startup read order: which docs to read every time and which to read only when needed;
-- current mode and authority summary;
-- active integrator and claimed/report-ready/open roles;
-- role soft-lease health, including stale candidates and takeover blockers;
-- active control directives, if any;
-- unprocessed handoff reports;
-- open review lanes and blocked implementation gates;
-- next safe actions by role;
-- conflicts, stale risks, and links back to authoritative docs.
-
-Rules:
-
-1. Read the snapshot first on yefeng startup when it exists.
-2. Always read `docs/授权策略.md`, `docs/角色认领.md`, `docs/并行任务登记.md`, and `docs/总控指令.md` before claiming or executing work, unless the user only asks a high-level question.
-3. Treat the snapshot as stale if its listed source docs changed after its timestamp, if git status shows those docs modified after the snapshot, or if its facts conflict with authoritative docs.
-4. When stale or conflicting, trust authoritative docs, then refresh the snapshot.
-5. Update the snapshot after processing handoffs, opening/closing directives, changing role/task states, approving checkpoints, completing merges, or changing authorization.
-6. Do not use the snapshot to approve checkpoints, mark work `DONE`, resolve conflicts, or override authorization.
-7. Keep detailed history in the registry, total-control document, handoff digests, minimal review conclusions, or git history. The snapshot is the map, not the territory.
+If safe same-role work remains, the role may continue it. If not, it should report `BLOCKED` or `REPORT_READY` and stop.
 
 ## Guardrails
 
-- Do not implement before governance exists unless the user explicitly asks for a one-off implementation.
-- Do not default to MVP when the user wants a long-term final system.
-- Do not rely on chat-only broad permission; write authorization into the project policy before using it repeatedly.
-- Do not let multiple roles freely edit the total-control document.
-- Do not let one top-level thread own multiple non-`DONE` roles. A thread that already owns a role must resume, wait on, or finish that role instead of claiming another role.
-- Do not make the user manually assign roles when a role-claim board exists and eligible roles are open.
-- Do not leave active role heartbeats running after the role is `DONE`.
-- Do not let a role heartbeat do duplicate work while the role coordinator is already actively executing in the same thread.
-- Do not use heartbeat as a substitute for deploying required worker or reviewer subagents. Heartbeat is a waiting mechanism, not the normal execution engine.
-- Do not treat an expired role lease as automatic permission to release or take over a role. It is only a stale-candidate signal until checked by the authorized integrator or user.
-- Do not mark a role `REPORT_READY` while it still has eligible unblocked tasks in its scope unless the final integrator explicitly asked for a pause.
-- Do not use the final integrator as the default reviewer when the authorization policy grants `AGENT_REVIEW`; the coordinator must deploy an independent reviewer subagent.
-- Do not treat an unprocessed handoff report as a blocker or heartbeat reason by itself.
-- Do not use "continue unblocked work" to jump to another coordinator's series. Continuing means continuing within the current role's owned proposal, review lane, handoff, or explicitly assigned same-role task.
-- Do not let registry updates become hidden chat-only state; write them into the agreed registry.
-- Do not let final-integrator repair decisions become hidden chat-only state; write them into the control-directive document.
-- Do not start new role work while an active control directive targets that role, checkpoint, write scope, or contract.
-- Do not let the status snapshot override authorization, role claims, task registry, active directives, minimal review conclusions, or total-control facts.
-- Do not preserve processed handoff reports as permanent coordination state.
-- Do not advance to `APPROVED`, `DONE`, merge, cleanup, release, or destructive operations unless the authorization policy and required evidence allow it.
-- If git is not initialized and parallel work is about to begin, recommend initializing git and committing a documentation baseline.
+- Do not let a role session assign itself or another role.
+- Do not let role sessions directly resume each other.
+- Do not let a subagent become a top-level role owner.
+- Do not merge without the required reviewer and validation evidence.
+- Do not hide cross-role decisions in chat-only text.
+- Do not let Markdown views and JSON state drift silently; reconcile before launching or resuming roles.
+- Do not keep processed handoff reports as permanent state.
+- Do not use the communication bus as a substitute for total-control directives when a decision is required.
+- Do not edit outside a role's allowed scope.
+- Do not leave dead process/session records marked `RUNNING`.
+- Do not continue after a policy-expanding decision without user approval.
 
 ## Expected Closeout
 
-When finishing a yefeng step, report:
+When finishing a 野蜂 step, report:
 
-- created or changed governance files;
-- authorization policy changes and effective authority;
-- status snapshot created, refreshed, stale, or not needed;
-- role claimed or role-claim completion status;
-- role lease refreshed, stale-candidate status, or takeover not needed;
-- heartbeat created, paused, activated, stopped, or not needed;
-- control directives opened, applied, superseded, closed, or not needed;
-- series/checkpoints covered;
-- unresolved decisions;
-- suggested next review lane;
-- whether git, heartbeat, or subagent delegation is ready.
+- role sessions launched, resumed, blocked, replaced, or completed;
+- worktrees/branches created or integrated;
+- messages routed and blockers cleared;
+- directives opened, applied, closed, or still active;
+- reviewer/validation evidence that changed state;
+- machine state and human docs updated;
+- status snapshot refreshed;
+- unresolved user decisions;
+- next total-control action.
+
+Use `references/templates.md` for concrete document skeletons and prompt patterns.
