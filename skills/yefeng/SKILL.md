@@ -113,6 +113,29 @@ When the snapshot, task registry, or total-control document lists next safe tota
 
 Repeatedly reporting "next action is X" while X is authorized, unblocked, and within the recorded parallelism limit is a 野蜂 failure. If execution is impossible, record the reason with `blocked_by`, `resume_when`, `required_evidence`, and `wake_target` instead of merely naming the future action.
 
+## Total-Control Heartbeat Lifecycle
+
+A total-control heartbeat is long-lived project infrastructure. Its job is to keep the total-control thread alive enough to notice new work, cleared blockers, finished role runs, user replies, and stale state. An idle heartbeat is a valid `IDLE_OK` result, not a reason to stop.
+
+Do not delete, pause, or disable the total-control heartbeat merely because:
+
+- no role sessions are currently running;
+- the next queue is empty;
+- all currently known checkpoints are complete;
+- the turn would otherwise be an empty poll;
+- you want to avoid idle loops or "空转".
+
+Only stop or delete a total-control heartbeat when the user explicitly asks to stop, pause, delete, turn off, archive, or end the 野蜂 control loop, or when a recorded authorization policy requires shutdown and that policy was approved by the user. A completed checkpoint, clean working tree, or empty task queue is not enough.
+
+When a heartbeat finds no executable work, it should:
+
+1. verify there are no running roles, pending outbox messages, merge-ready branches, ready-to-resume blockers, active directives, or dirty stable governance files;
+2. refresh the status snapshot only if facts changed;
+3. report `IDLE_OK`, the facts checked, and what would wake new work;
+4. leave the heartbeat active at the existing cadence unless the user explicitly changes it.
+
+Do not create no-op commits just to prove the heartbeat ran. Do not call automation delete/update-to-paused as part of normal total-control closeout.
+
 ## Role Assignment
 
 `docs/角色分配.md` is the human-readable assignment board. `.yefeng/state/roles.json` is the script-readable assignment state. Keep them in sync whenever the total-control thread changes role ownership or status.
@@ -554,6 +577,7 @@ If safe same-role work remains, the role may continue it. If not, it should repo
 - Do not let Markdown views and JSON state drift silently; reconcile before launching or resuming roles.
 - Do not write governance JSON with scripts that fail when a new field is needed; use rerunnable property update helpers.
 - Do not commit Markdown governance views with unresolved placeholders or broken inline code formatting.
+- Do not delete, pause, or disable the total-control heartbeat because the project is temporarily idle.
 - Do not keep processed handoff reports as permanent state.
 - Do not use the communication bus as a substitute for total-control directives when a decision is required.
 - Do not edit outside a role's allowed scope.
@@ -573,6 +597,7 @@ When finishing a 野蜂 step, report:
 - status snapshot refreshed;
 - stable governance changes committed, or the exact blocker preventing that commit;
 - working-tree cleanliness for the project-owned integration surface;
+- heartbeat remains active, or the explicit user-approved reason it was stopped;
 - unresolved user decisions;
 - next total-control action.
 

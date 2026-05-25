@@ -67,6 +67,8 @@ Use these templates only when the project lacks equivalent local docs. 野蜂 do
 
 `docs/总控状态快照.md` 中的“下一步待执行队列”不是建议列表。若没有更高优先级的 run 处理、outbox 路由、阻塞裁决、恢复或合并工作消耗本轮，总控必须执行队列第一项安全动作；如果不能执行，必须写清 `blocked_by`、`resume_when`、`required_evidence` 和 `wake_target`。
 
+总控心跳是长期保活机制。没有运行角色、没有待执行队列、当前 checkpoint 全部完成，只能得到 `IDLE_OK`，不能因此删除、暂停或关闭心跳。只有用户明确要求停止/暂停/删除/归档/结束野蜂总控循环，或经用户批准的授权策略要求停机时，才可停止心跳。空跑时报告已检查的事实和下一次唤醒条件，并保持现有 cadence。
+
 ## 8. 阻塞处理
 
 角色阻塞时必须写清：
@@ -676,7 +678,8 @@ safe_same_role_work_available:
 11. 生成 Markdown 治理视图时，避免双引号 here-string 吃掉反引号或 `$()`；优先用单引号 here-string + `__PLACEHOLDER__` 替换，并读回检查没有 `__PLACEHOLDER__`、`$sessionId`、`$roleCommit`、`$(` 等残留；
 12. 将稳定治理事实提交到版本库：`.yefeng/state/**`、`.yefeng/events.jsonl`、任务登记、角色分配、通信路由、总控指令、交接摘要和状态快照。只有项目策略明确不版本化这些文件，或存在具体冲突/授权阻塞时，才可保留未提交，并必须写出 blocker；
 13. 运行 `git diff --check` 和 `git status --short` 验证项目集成面干净；若只有被刻意 gitignore 的运行运输文件可忽略，若稳定治理文件仍脏则本轮不能报告完整通过；
-14. 汇报本轮实际执行的动作、仍阻塞的问题、提交/合并 commit、工作区是否干净和下一次触发条件；不要只汇报“下一步应做 X”。
+14. 若没有任何可执行工作，报告 `IDLE_OK`，说明已检查 running roles、outbox、merge-ready、ready-to-resume、active directives、dirty governance，并保持总控心跳 active；
+15. 汇报本轮实际执行的动作、仍阻塞的问题、提交/合并 commit、工作区是否干净、心跳仍 active 和下一次触发条件；不要只汇报“下一步应做 X”，也不要因为空闲而删除/暂停心跳。
 ```
 
 ### PowerShell Governance Update Notes
