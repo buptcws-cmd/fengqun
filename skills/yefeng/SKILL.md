@@ -103,6 +103,16 @@ Still require user confirmation for:
 
 Do not use `--dangerously-bypass-approvals-and-sandbox` for launched role sessions unless the authorization policy explicitly allows it for the project.
 
+## Total-Control Execution Turns
+
+A total-control turn is executable by default, including prompts described as "check", "poll", "巡检", "resume", "continue", heartbeat, or automation. Those words mean inspect state and perform any authorized control action now. They do not mean read-only.
+
+Treat a total-control turn as read-only only when the user or automation prompt explicitly says `read-only`, `dry-run`, `no launch`, `do not start`, `do not resume`, `do not merge`, or when policy, evidence, capacity, conflict, or missing authority blocks execution.
+
+When the snapshot, task registry, or total-control document lists next safe total-control actions, treat them as a prioritized execution queue, not suggestions. If no higher-priority completed run, outbox import, blocker ruling, resume, or merge consumes the turn and capacity remains, execute the first unblocked queue item before final reporting. That can mean assigning a role, launching a role session, resuming a cleared role, integrating a merge-ready branch, or writing the concrete blocker that prevents execution.
+
+Repeatedly reporting "next action is X" while X is authorized, unblocked, and within the recorded parallelism limit is a 野蜂 failure. If execution is impossible, record the reason with `blocked_by`, `resume_when`, `required_evidence`, and `wake_target` instead of merely naming the future action.
+
 ## Role Assignment
 
 `docs/角色分配.md` is the human-readable assignment board. `.yefeng/state/roles.json` is the script-readable assignment state. Keep them in sync whenever the total-control thread changes role ownership or status.
@@ -195,6 +205,42 @@ If a reliable session ID cannot be found, do not use broad `--last` in a shared 
 
 When launching background helper processes on Windows, use `Start-Process` with `-WindowStyle Hidden` unless the user explicitly wants visible terminals. Prefer `pwsh` for helper scripts. If scripts must run under Windows PowerShell 5.1, keep script source ASCII-only or save it with a BOM; UTF-8-without-BOM scripts containing Chinese here-strings can fail before execution.
 
+Before writing launch/resume helper scripts on Windows, resolve the Codex CLI to an explicit command path and verify it. Prefer a working `codex.cmd` or npm shim over the WindowsApps `codex.exe` app alias; the alias can appear in `Get-Command codex` but fail with access denied inside background helper processes. Use the resolved command via `& $codexCommand exec ...` instead of bare `codex`, and record `codex_command` in run metadata. If a helper reports access denied for `WindowsApps\codex.exe`, treat it as a command-resolution failure, fix the launcher, and retry the role from the recorded assignment.
+
+```powershell
+$codexCommand = $null
+$cmdCandidates = @(
+  (Get-Command codex.cmd -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source),
+  (Get-Command codex -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)
+) | Where-Object { $_ }
+
+foreach ($candidate in $cmdCandidates) {
+  if ($candidate -like '*\WindowsApps\codex.exe') { continue }
+  try {
+    & $candidate --version > $null
+    $codexCommand = $candidate
+    break
+  } catch {}
+}
+
+if (-not $codexCommand) {
+  throw 'No usable Codex CLI command found; WindowsApps codex.exe app alias is not sufficient for background role launch.'
+}
+```
+
+For Windows projects with non-ASCII paths, filenames, or governance docs, put a UTF-8 prelude at the top of generated launch/resume helper scripts before `Get-Content`, `codex exec`, or log parsing:
+
+```powershell
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = $utf8NoBom
+[Console]::OutputEncoding = $utf8NoBom
+$OutputEncoding = $utf8NoBom
+$env:PYTHONIOENCODING = 'utf-8'
+try { chcp.com 65001 > $null } catch {}
+```
+
+Prefer explicit authoritative paths from prompts, assignment manifests, and docs over paths recovered from garbled console listings. If JSONL or stderr shows mojibake for Chinese file names, fix the launch script encoding and rerun a small probe before relying on that output for routing, blockers, or merges.
+
 Sandbox choice is part of the run record. On Windows, `-s workspace-write` may prevent spawned role sessions from using shell commands in some environments. If that happens and the authorization policy permits it, use a dedicated role worktree plus `-s danger-full-access` for that role run instead of using approval bypass flags. Record the reason and keep the write scope constrained by prompt, worktree, branch, and review gates.
 
 Before launching the first implementation role on Windows, total-control should run a tiny sandbox probe in a disposable directory:
@@ -239,9 +285,20 @@ The total-control thread integrates:
 6. run integration validation;
 7. write stable facts to the registry and total-control doc;
 8. emit a `BASELINE_UPDATED` event;
-9. update affected role worktrees with the new baseline, then resume from each role's own worktree if they need to continue.
+9. commit the stable governance updates (`.yefeng/state/**`, `.yefeng/events.jsonl`, task registry, assignment board, route views, directives, handoffs, and status snapshot) unless the project policy explicitly says those files are not versioned;
+10. update affected role worktrees with the new baseline, then resume from each role's own worktree if they need to continue.
 
 Do not merge unreviewed half-work merely to keep other roles current. Do not hold a complete reviewed unit indefinitely when it is already safe to integrate.
+
+After an integration checkpoint, a total-control closeout is not complete while stable governance files remain dirty. Either commit those stable facts, or record a concrete blocker explaining why they must stay uncommitted. Ignore runtime transport files only when they are intentionally gitignored or outside the versioned governance surface.
+
+When writing governance update scripts, prefer data structures and templates that are safe to rerun:
+
+- PowerShell `ConvertFrom-Json` returns `PSCustomObject`; assigning a property that does not already exist can fail. For fields that may be new, update an `[ordered]` hashtable before serialization, or use `Add-Member -Force` / `.PSObject.Properties.Remove(...)` plus `Add-Member` deliberately.
+- After rewriting `.yefeng/state/*.json`, read the JSON back and verify required fields such as `state`, `session_id`, `exit_code`, `role_commit`, `merge_commit`, and `codex_command` before committing.
+- For Markdown governance views, avoid double-quoted PowerShell here-strings that contain Markdown backticks or `$()` text. Prefer single-quoted here-strings with explicit placeholders such as `__ROLE_COMMIT__`, then replace placeholders with concrete values.
+- Read generated Markdown views back before commit and check that no unresolved placeholders or accidental script fragments remain, such as `__PLACEHOLDER__`, `$sessionId`, `$roleCommit`, or `$(`.
+- Run `git diff --check` and `git status --short` after staging stable governance files. A clean final status is evidence; a dirty stable governance file is a blocker, not a pass.
 
 ## Communication Bus
 
@@ -331,7 +388,7 @@ Directives do not replace authorization or reviewer gates. They tell a role what
 - active directives;
 - unprocessed handoff reports;
 - latest integration baseline;
-- next safe total-control actions;
+- next safe total-control action queue, as prioritized executable work rather than suggestions;
 - docs that must be read before changing state.
 
 The snapshot is not an approval source. If it conflicts with role assignment, registry, directives, event log, reviewer evidence, or authorization policy, trust the authoritative source and refresh the snapshot.
@@ -450,13 +507,15 @@ When acting as the total-control thread:
 4. route messages;
 5. detect blockers that are cleared;
 6. resume roles whose conditions are satisfied;
-7. launch new roles if capacity remains;
+7. launch new roles if capacity remains, including the first unblocked item in the next safe total-control action queue;
 8. integrate merge-ready work with evidence;
 9. update docs and machine state;
 10. refresh the status snapshot;
-11. tell the user what changed and what is still blocked.
+11. commit stable governance updates or record the blocker that prevents committing them;
+12. verify the working tree is clean except for intentionally untracked/ignored runtime transport or unrelated user changes;
+13. tell the user what changed and what is still blocked.
 
-If authorized work is ready, do it. Do not merely suggest a future action when the total-control thread has enough evidence and authority to execute it.
+After processing run results, messages, blockers, resumes, and merges, do not end with only a recommendation if an authorized queue item remains executable. Perform it, or write the concrete blocker that prevents it. If authorized work is ready, do it.
 
 ## Running A Role Session
 
@@ -493,6 +552,8 @@ If safe same-role work remains, the role may continue it. If not, it should repo
 - Do not merge without the required reviewer and validation evidence.
 - Do not hide cross-role decisions in chat-only text.
 - Do not let Markdown views and JSON state drift silently; reconcile before launching or resuming roles.
+- Do not write governance JSON with scripts that fail when a new field is needed; use rerunnable property update helpers.
+- Do not commit Markdown governance views with unresolved placeholders or broken inline code formatting.
 - Do not keep processed handoff reports as permanent state.
 - Do not use the communication bus as a substitute for total-control directives when a decision is required.
 - Do not edit outside a role's allowed scope.
@@ -510,6 +571,8 @@ When finishing a 野蜂 step, report:
 - reviewer/validation evidence that changed state;
 - machine state and human docs updated;
 - status snapshot refreshed;
+- stable governance changes committed, or the exact blocker preventing that commit;
+- working-tree cleanliness for the project-owned integration surface;
 - unresolved user decisions;
 - next total-control action.
 

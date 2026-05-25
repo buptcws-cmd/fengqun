@@ -59,7 +59,15 @@ Use these templates only when the project lacks equivalent local docs. 野蜂 do
 - 已写交接报告或结果摘要；
 - 无未关闭的阻塞消息或 ACTIVE 指令。
 
-## 7. 阻塞处理
+## 7. 执行性总控轮次
+
+总控轮次默认是执行轮次。用户或自动化提示中出现“检查”“巡检”“心跳”“继续”“恢复”时，含义是先检查状态，再执行当前已授权且未阻塞的控制动作。
+
+只有当提示明确写了 `read-only`、`dry-run`、`no launch`、`do not start/resume/merge`，或授权/证据/并行度/冲突确实阻塞时，才只读汇报。
+
+`docs/总控状态快照.md` 中的“下一步待执行队列”不是建议列表。若没有更高优先级的 run 处理、outbox 路由、阻塞裁决、恢复或合并工作消耗本轮，总控必须执行队列第一项安全动作；如果不能执行，必须写清 `blocked_by`、`resume_when`、`required_evidence` 和 `wake_target`。
+
+## 8. 阻塞处理
 
 角色阻塞时必须写清：
 
@@ -73,7 +81,7 @@ safe_same_role_work_available:
 
 总控线程判定 `resume_when` 满足后，使用记录的 session_id 恢复目标角色。
 
-## 8. 变更记录
+## 9. 变更记录
 ```
 
 ## Authorization Policy Skeleton
@@ -125,6 +133,19 @@ safe_same_role_work_available:
 
 - `codex exec` 不应传入交互 CLI 专用的 `-a/--ask-for-approval` 参数；只使用 `codex exec --help` 中存在的参数。
 - `codex exec resume` 若没有 `-C`，必须从角色 worktree 目录发起；恢复前先创建 run 日志目录，避免 stdout/stderr 重定向先失败。
+- Windows helper 生成前必须解析并验证 Codex CLI 的显式路径。优先使用可执行的 `codex.cmd`/npm shim；若 `Get-Command codex` 指向 `WindowsApps\codex.exe`，不要把它当作后台启动命令。helper 中使用 `& $codexCommand exec ...`，并把 `codex_command` 写入 run metadata。若日志出现 `WindowsApps\codex.exe` access denied，视为 launcher 解析失败，修正后按同一 assignment 重试。
+- Windows 项目若有中文路径、中文文件名或中文治理文档，生成的 launch/resume helper 脚本必须先设置 UTF-8 控制台编码，再读取 prompt 或启动 `codex exec`。建议脚本开头加入：
+
+```powershell
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = $utf8NoBom
+[Console]::OutputEncoding = $utf8NoBom
+$OutputEncoding = $utf8NoBom
+$env:PYTHONIOENCODING = 'utf-8'
+try { chcp.com 65001 > $null } catch {}
+```
+
+- 若 JSONL、stdout 或 stderr 中出现中文文件名乱码，不要用乱码路径当作权威事实；先按 manifest/prompt 中的显式路径读取，并修正脚本编码后重跑小探针。
 - 默认记录 sandbox mode。Windows 上总控启动第一批实现角色前应先运行一次 sandbox probe：用 `workspace-write` 启动极小 `codex exec`，要求打印当前目录；若出现 `CreateProcessAsUserW failed: 5`，把 `workspace-write-shell=false` 写入状态快照或 runs 状态。之后需要 shell 的实现角色在独立 worktree 内使用 `-s danger-full-access`，但不得使用 approval bypass。
 - `.yefeng/runs/`、`.yefeng/assignment.json`、`.yefeng/outbox/` 默认是本地运行/运输材料，建议加入 `.gitignore`；长期事实写入状态 JSON、事件 JSONL、通信视图和交接摘要。
 
@@ -616,6 +637,8 @@ safe_same_role_work_available:
 ```text
 作为野蜂总控线程，读取授权策略、角色分配、任务登记、总控指令、通信总线、状态快照和交接报告。
 
+这是执行轮次，不是只读计划。除非用户明确说 read-only/dry-run/no launch，否则你必须把已授权、未阻塞、容量允许的角色分配并启动起来；不要只列出准备启动的角色。
+
 目标：
 <user goal>
 
@@ -628,13 +651,16 @@ safe_same_role_work_available:
 6. 从 JSONL 的 `thread.started.thread_id` 解析 session_id；
 7. 记录 run/session/process/log/last-message/prompt/assignment/sandbox；
 8. 写 ROLE_ASSIGNED / ROLE_STARTED 事件；
-9. 给用户报告启动了什么、等待什么、下一次如何继续。
+9. 刷新 docs/总控状态快照.md，把未执行动作只保留在仍被阻塞或容量不足的队列中；
+10. 给用户报告实际启动了什么、等待什么、仍阻塞什么。
 ```
 
 ## Total-Control Poll / Resume Prompt Pattern
 
 ```text
 作为野蜂总控线程，检查后台角色会话、通信总线、阻塞条件、交接报告、reviewer 证据和 merge-ready 分支。
+
+这是执行轮次，不是只读巡检。除非用户明确说 read-only/dry-run/no launch/do not start/resume/merge，否则检查后必须执行当前已授权、未阻塞、容量允许的第一项控制动作。
 
 请执行：
 1. 处理已完成 run；
@@ -644,8 +670,37 @@ safe_same_role_work_available:
 5. 对 READY_TO_RESUME 角色，先更新其 worktree 基线，再从该 worktree 目录使用 session_id 恢复；
 6. 对 MERGE_READY 角色检查 reviewer/验证证据，排除 `.yefeng/assignment.json` 和 `.yefeng/outbox/**` 后集成；
 7. 集成后写 BASELINE_UPDATED 事件并唤醒受影响角色；
-8. 刷新 docs/总控状态快照.md；
-9. 汇报仍阻塞的问题和下一步。
+8. 如果本轮没有更高优先级工作消耗执行机会，读取状态快照/任务登记中的下一步待执行队列，选择第一项安全动作并执行：分配、启动、恢复、集成，或写出具体阻塞；
+9. 刷新 docs/总控状态快照.md，只把仍未满足条件或容量不足的项目留在队列中；
+10. 更新治理 JSON 时使用可重跑的属性更新方式；PowerShell 中不要假设 `ConvertFrom-Json` 后的对象能直接赋不存在的属性，必要时用 `[ordered]` hashtable 或 `Add-Member -Force`；
+11. 生成 Markdown 治理视图时，避免双引号 here-string 吃掉反引号或 `$()`；优先用单引号 here-string + `__PLACEHOLDER__` 替换，并读回检查没有 `__PLACEHOLDER__`、`$sessionId`、`$roleCommit`、`$(` 等残留；
+12. 将稳定治理事实提交到版本库：`.yefeng/state/**`、`.yefeng/events.jsonl`、任务登记、角色分配、通信路由、总控指令、交接摘要和状态快照。只有项目策略明确不版本化这些文件，或存在具体冲突/授权阻塞时，才可保留未提交，并必须写出 blocker；
+13. 运行 `git diff --check` 和 `git status --short` 验证项目集成面干净；若只有被刻意 gitignore 的运行运输文件可忽略，若稳定治理文件仍脏则本轮不能报告完整通过；
+14. 汇报本轮实际执行的动作、仍阻塞的问题、提交/合并 commit、工作区是否干净和下一次触发条件；不要只汇报“下一步应做 X”。
+```
+
+### PowerShell Governance Update Notes
+
+```powershell
+function Set-PropertyValue($object, [string] $name, $value) {
+  if ($object.PSObject.Properties[$name]) {
+    $object.$name = $value
+  } else {
+    $object | Add-Member -NotePropertyName $name -NotePropertyValue $value -Force
+  }
+}
+
+$template = @'
+# 总控状态快照
+
+- session: `__SESSION_ID__`
+- role commit: `__ROLE_COMMIT__`
+'@
+
+$text = $template.Replace('__SESSION_ID__', $sessionId).Replace('__ROLE_COMMIT__', $roleCommit)
+if ($text -match '__[A-Z0-9_]+__|\$sessionId|\$roleCommit|\$\(') {
+  throw 'Generated governance Markdown still contains unresolved placeholders or script fragments.'
+}
 ```
 
 ## Series Proposal Header
