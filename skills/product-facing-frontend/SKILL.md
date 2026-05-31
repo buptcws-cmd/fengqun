@@ -1,6 +1,6 @@
 ---
 name: product-facing-frontend
-description: Build, modify, redesign, audit, or review frontend UI as real user-facing product surfaces instead of developer reports. Use when Codex creates or changes web apps, dashboards, editors, sidebars, settings pages, AI panels, admin tools, empty states, navigation, or frontend copy; when avoiding developer-facing wording such as mock, fixture, readonly, writeback, route matrix, status proof, backend contract, audit report, operation result, or internal IDs; and when validating that visible UI is actionable for end users before finishing frontend work.
+description: Build, modify, redesign, audit, or review frontend UI as real user-facing product surfaces instead of developer reports. Use when Codex creates or changes web apps, dashboards, editors, sidebars, settings pages, AI panels, admin tools, empty states, navigation, or frontend copy; when preventing developer-facing wording such as mock, fixture, readonly, writeback, route matrix, status proof, backend contract, audit report, operation result, or internal IDs from being created in the first place; and when auditing existing UI for these issues only if the user asks, the app already exists, or a broad refactor may leave old surfaces behind.
 ---
 
 # Product-Facing Frontend
@@ -54,6 +54,19 @@ Prefer product terms:
 7. Keep AI surfaces framed as suggestions and confirmations, not autonomous execution reports.
 8. Make settings pages about user choices and consequences, not integration internals.
 
+## Creation Mode
+
+Use this mode by default when creating new frontend UI.
+
+- Prevent bad UI at design time. Do not create developer-report sections and plan to remove them later.
+- Prefer one usable workflow over several explanatory cards.
+- Create only the screens, panels, states, and controls needed for the user's task.
+- Include empty states only when they help the user act: create, connect, import, select, retry, or configure.
+- Use static source review and focused tests to catch forbidden terms before running the app.
+- Browser checks are optional for newly created UI unless the repo's normal workflow, the task risk, or the user's request calls for visual verification.
+
+Creation mode succeeds when the implemented source does not introduce developer-report UI in the first place.
+
 ## Source-Level Guidance
 
 Map raw states before render:
@@ -73,9 +86,9 @@ When a technical concept must be shown, explain its product impact:
 - Bad: “model route matrix”
 - Good: “按写作任务选择模型”
 
-## Page Review Checklist
+## Audit Mode
 
-Before finishing frontend work, inspect all reachable pages and panels, not only the page you changed:
+Use audit mode only when working with existing UI, broad refactors, migrations, reported visual/copy problems, or explicit user requests to inspect pages. In audit mode, inspect reachable pages and panels, not only the page you changed:
 
 - Main navigation pages.
 - Sidebars, drawers, filters, popovers, modals, and empty states.
@@ -94,13 +107,18 @@ For each page verify:
 
 ## Validation
 
-After frontend changes:
+For newly created UI:
 
 1. Run targeted tests for copy, layout, and view models when present.
 2. Run broader tests/typecheck/build appropriate to the repo.
-3. Use a browser to open the local app and walk through reachable pages.
-4. Search rendered DOM text or snapshots for high-risk terms.
-5. Commit only after the UI behavior and visible copy have been checked.
+3. Search changed source and relevant test snapshots for high-risk terms.
+4. Use browser visual checks only when needed by task risk, repo convention, interactive behavior, or user request.
+
+For existing UI audits or broad refactors:
+
+1. Use a browser to open the local app and walk through relevant reachable pages.
+2. Search rendered DOM text or snapshots for high-risk terms.
+3. Verify navigation, sidebars, settings, AI panels, and empty states are product-facing.
 
 Useful search pattern:
 
@@ -110,4 +128,4 @@ mock|fixture|readonly|writeback|text_anchor|branch_head|route matrix|repository|
 
 ## Completion Standard
 
-Do not call frontend work complete merely because implementation and tests pass. Complete it when the app has been opened, key pages have been inspected, and the visible interface reads like a tool for its users rather than a report to its developers.
+Do not call frontend work complete merely because implementation compiles. Complete creation work when the source and tests show the UI was designed as a user-facing product surface from the start. Complete audit work when the relevant existing pages have also been inspected and no developer-report surfaces remain visible.
