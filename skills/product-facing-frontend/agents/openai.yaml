@@ -1,0 +1,4 @@
+interface:
+  display_name: "Product-Facing Frontend"
+  short_description: "Keep UI product-facing, not developer-facing."
+  default_prompt: "Use $product-facing-frontend to build or audit frontend UI so screens stay user-facing, actionable, and free of developer-report copy."
