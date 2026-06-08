@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gongfeng"
+  short_description: "Prevent fallback patches and scan root-cause debt"
+  default_prompt: "Use $gongfeng to fix this code issue from the source before adding fallback logic."
