@@ -52,9 +52,9 @@ Use compact statuses such as `unclaimed`, `claimed`, `blocked`, `proposal`, `pro
 
 `done` means the worktree task passed its local validation/review. `merged` means it has been integrated back to the main branch and the registry has been updated. Do not treat `done` as merged.
 
-Treat claims as soft leases, not ownership. A claim lease records who is actively holding a checkpoint and how to find the work; it does not give permanent ownership of the task and it must not be auto-released just because a timestamp passed. Prefer a registry column named `Claim` instead of `Owner` or `Owner / Conversation`. If an existing registry already has an owner/conversation column, interpret it as the claim lease field until the registry can be safely renamed. The claim value must be stable and absolute, such as `claim: codex-20260520-1210-t1-preflight; since 2026-05-20T12:10+0800; last_seen=2026-05-20T13:00+0800; lease_expires=2026-05-20T17:00+0800`. For coordinator-dispatched workers, include both a worker token and parent coordinator token, such as `claim: codex-20260520-1430-t2-ai-guidance/worker-a; parent=codex-20260520-1425-series-coordinator; since 2026-05-20T14:30+0800`. If no platform-provided thread or agent id is available, generate a local unique token like `codex-YYYYMMDD-HHMM-<task-slug>`.
+Treat claims as leases, not permanent ownership. A claim lease records who is actively holding a checkpoint and how to find the work. Prefer a registry column named `Claim` instead of `Owner` or `Owner / Conversation`. If an existing registry already has an owner/conversation column, interpret it as the claim lease field until the registry can be safely renamed. The claim value must be stable and absolute, such as `claim: codex-20260520-1210-t1-preflight; since 2026-05-20T12:10+0800; last_seen=2026-05-20T13:00+0800; lease_expires=2026-05-20T17:00+0800`. For coordinator-dispatched workers, include both a worker token and parent coordinator token, such as `claim: codex-20260520-1430-t2-ai-guidance/worker-a; parent=codex-20260520-1425-series-coordinator; since 2026-05-20T14:30+0800`. If no platform-provided thread or agent id is available, generate a local unique token like `codex-YYYYMMDD-HHMM-<task-slug>`.
 
-Do not write relative claim identities such as `current conversation`, `Current Codex conversation`, `this agent`, `me`, `active Codex`, or `当前会话`. They are ambiguous in future conversations. Any non-empty claim lease means the task is already held unless the registry explicitly marks it released, the user authorizes takeover, or the registry defines and satisfies a stale-lease rule. A stale lease should first become a stale candidate; takeover should require checking recent progress evidence, handoffs, commits, heartbeats, and repo authorization.
+Do not write relative claim identities such as `current conversation`, `Current Codex conversation`, `this agent`, `me`, `active Codex`, or `当前会话`. They are ambiguous in future conversations. Any non-empty claim lease means the task is already held unless the registry explicitly marks it released, the user authorizes takeover, or the registry defines and satisfies an expiry rule. When used with yefeng role governance, `lease_expires_at` is normally `last_seen + 4h`; once it passes, the old thread is considered dead and the role/task is reclaimable. A takeover should still record the previous owner, expiry time, and reason, then inspect handoffs, commits, worktrees, and active directives before resuming.
 
 When creating a new `NEXT_STEPS.md` or equivalent registry, do not treat the series as a flat backlog. Map the task dependency graph first: mark which checkpoints must be serial, which can safely run in parallel, which decisions or contracts are prerequisites, and which shared write surfaces make parallel work unsafe. A task should be parallel-eligible only when its upstream assumptions are stable and its declared write surfaces will not collide with another active task.
 
@@ -64,7 +64,7 @@ Keep registry-wide non-goals compatible with task write surfaces. Do not write a
 
 ## Claim Protocol
 
-Only claim work that is `unclaimed` and has no active claim lease, or work that is explicitly released by the user/current claimant. Do not take over another active task unless the user authorizes it, the claimant released it, or the registry marks the claim stale and the repo rules allow takeover.
+Only claim work that is `unclaimed` and has no active claim lease, work that is explicitly released by the user/current claimant, or work whose lease is expired and reclaimable under local authority. Do not take over another unexpired active task unless the user authorizes it or the claimant released it.
 
 An active claim is a hard execution boundary for non-claimants. A non-claimant must not enter the claimed task worktree, run validation there, start dev servers, create review artifacts, run governance write-index commands, stage/commit, merge, cleanup, or edit files inside that task. The safe non-claimant actions are to read the registry, inspect main-branch coordination facts when needed, report the blocker, ask for takeover authorization, or wait/heartbeat if the workflow explicitly calls for idle intake.
 
@@ -82,20 +82,31 @@ When claiming a task, update the registry before implementation with:
 
 Claim the smallest coherent checkpoint. Do not reserve the whole roadmap unless tasks are inseparable or the user explicitly asks this conversation to own the whole series.
 
-Refresh a claim lease at natural progress points: claiming, starting or resuming active work, dispatching or receiving a worker/reviewer result, before and after long commands, writing a handoff, changing blockers, or entering waiting heartbeat. Do not run a heartbeat solely to renew a lease while the same thread is actively executing; use a longer active lease instead.
+Refresh a claim lease at natural progress points: claiming, starting or resuming active work, dispatching or receiving a worker/reviewer result, before and after long commands, writing a handoff, changing blockers, or entering blocked wait. If local authority requires a keepalive heartbeat, use it exactly for liveness renewal. In yefeng projects this is `keepalive-hourly`: it runs about every hour, sets `lease_expires_at` to about `now + 4h`, and must not execute tasks, repeat commands, claim new work, or change scope.
 
 ## Coordinator Mode
 
 Use coordinator mode when the user asks to continue a series and subagents can safely own worker checkpoints. Coordinator mode is especially useful when several unblocked tasks can run in parallel.
 
+Model and reasoning tiering is part of dispatch planning. If the user wants top-level agents to use the strongest available model, keep that as the default for the coordinator/final integrator, then choose each worker or reviewer subagent tier by task risk instead of blindly using the strongest tier for every delegation.
+
+- Use the highest tier for final integration, architecture decisions, cross-module contracts, authorization changes, security/privacy boundaries, merge/cleanup decisions, high-impact review gates, and hard root-cause debugging.
+- Use a high tier for shared implementation, migrations, editor/version/AI logic, nontrivial refactors, flaky tests, and reviewers whose verdict can unlock `approved`, `done`, merge, or cleanup.
+- Use a medium or high-medium tier for bounded implementation, test additions, focused docs updates, local validation, and read-only audits with a narrow scope.
+- Use an economy/standard tier only for mechanical search, formatting, boilerplate, or low-risk summarization that cannot change contracts or state.
+- If the risk is unclear, upgrade the tier. A reviewer for a high-risk gate should not be weaker than the implementation risk being reviewed.
+
+Record the requested model/reasoning tier in the worker or reviewer prompt, and in the registry or handoff when that choice matters for later audit. Do not preserve raw cost traces unless the repo explicitly requires them; a concise tier label and reason are enough.
+
 Coordinator responsibilities:
 
 - read the local authority and registry before dispatch;
 - decide which checkpoints are runnable, blocked, claimant-only, or safe to parallelize;
+- choose and record each dispatched subagent's model/reasoning tier based on task risk;
 - avoid claiming worker tasks for the main agent unless the main agent will actually implement that one task;
 - create or select one dedicated worktree per worker task before product-file edits;
 - update the registry with the worker claim, branch/worktree, scope, write surfaces, validation plan, review gate, claimant-only next action, and non-claimant/coordinator action before dispatch;
-- give each worker a bounded prompt naming its task id, allowed write surfaces, forbidden surfaces, branch/worktree, validation requirements, and whether it may commit;
+- give each worker a bounded prompt naming its task id, requested model/reasoning tier, allowed write surfaces, forbidden surfaces, branch/worktree, validation requirements, and whether it may commit;
 - keep worker write sets disjoint unless the registry declares a serial boundary and the upstream worker has released or merged;
 - use reviewer subagents as review gates when required, but keep the coordinator responsible for remediation decisions and closure;
 - integrate returned worker results by inspecting diffs and evidence, then update only stable registry facts;
@@ -201,18 +212,23 @@ Stop normal task execution and report the blocker when:
 
 ## Idle Heartbeat
 
-For an open series, maintain one thread heartbeat at the cadence required by local authority, or 15 minutes by default, only while all of these are true:
+For an open series, follow the heartbeat model required by local authority. In yefeng role-based projects, use two distinct heartbeats:
+
+- `keepalive-hourly`: always active for a claimed non-`DONE` role or task, only to refresh `last_seen` and `lease_expires_at=now+4h`.
+- `blocker-check-20m`: active only while this conversation has no runnable claimed task, no safe unclaimed checkpoint in its role, and a concrete blocker to re-check.
+
+For non-yefeng series without local heartbeat rules, maintain one idle thread heartbeat at 15 minutes by default only while all of these are true:
 
 - this conversation has no runnable claimed task;
 - no safe unclaimed checkpoint exists;
 - no local validation, review, merge, cleanup, or other task execution is currently in progress in this conversation;
 - the user has asked for continued series execution or the repo guide explicitly calls for idle intake.
 
-If a runnable task appears, or this conversation has a claimed task that can continue, stop the heartbeat before claiming or continuing work. If the registry shows the series is complete, or the user cancels continuation, stop the heartbeat permanently and do not recreate it.
+If a runnable task appears, or this conversation has a claimed task that can continue, stop the idle or `blocker-check-20m` heartbeat before claiming or continuing work, while keeping any required keepalive heartbeat. If the registry shows the series is complete, or the user cancels continuation, stop the heartbeat permanently and do not recreate it; in yefeng role workflows, stop both `keepalive-hourly` and `blocker-check-20m` when the role is `DONE`.
 
 Before creating a heartbeat, check whether one already exists for the same series when the environment supports automation inspection. Update the existing heartbeat instead of creating a duplicate. If heartbeat automation is unavailable, report the idle state and stop; do not emulate it with shell loops.
 
-Heartbeat wakeups must be quiet and registry-driven: reread the local authority and series registry, obey claim leases, refresh waiting leases when appropriate, continue only newly runnable work, and avoid file edits or long reports when nothing changed. Never park a shell `sleep`, `while`, or other long-running process to keep a series alive.
+Heartbeat wakeups must be quiet and registry-driven: reread the local authority and series registry, obey claim leases, refresh waiting leases when appropriate, continue only newly runnable work, and avoid file edits or long reports when nothing changed. A keepalive wake is even narrower: refresh liveness and exit. Never park a shell `sleep`, `while`, or other long-running process to keep a series alive.
 
 ## User-Facing Closeout
 
