@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hygienic Bee"
+  short_description: "Turn user-path failures into recovery flows"
+  default_prompt: "Use $hygienic-bee to audit this code path and replace user-facing error endpoints with recovery flows."
