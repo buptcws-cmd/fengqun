@@ -1,4 +1,4 @@
 interface:
   display_name: "野蜂"
-  short_description: "Use a total-control Codex thread to orchestrate role sessions, communication, review, and integration"
-  default_prompt: "使用 $yefeng / 野蜂，把我的项目推进成由总控线程分配角色、启动后台 Codex 会话、路由通信、审核合并的自动化协作系统。"
+  short_description: "Use a total-control Codex thread to bootstrap governance, then orchestrate roles, communication, review, and integration"
+  default_prompt: "使用 $yefeng / 野蜂，先判断项目启动档位；如适合，先建立治理骨架，再在我授权后升级到总控分配角色、后台 Codex 会话、路由通信、审核合并的协作系统。"

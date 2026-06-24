@@ -1,6 +1,6 @@
 ---
 name: yefeng
-description: Use 野蜂 when a large project should be advanced by one total-control Codex thread that assigns roles, launches or resumes background Codex sessions, routes recorded communication, delegates subagents, reviews evidence, and integrates work through governed checkpoints.
+description: Use 野蜂 when a large project should be advanced by one total-control Codex thread that assigns roles, launches or resumes background Codex sessions, routes recorded communication, delegates subagents, reviews evidence, and integrates work through governed checkpoints. Also use when starting a new large project that needs a phased governance bootstrap before full parallel role execution.
 ---
 
 # 野蜂
@@ -8,6 +8,30 @@ description: Use 野蜂 when a large project should be advanced by one total-con
 野蜂 is a governed multi-Codex work system. The user talks to one total-control thread. That total-control thread assigns roles, starts and resumes background Codex role sessions, routes recorded communication, manages worktrees and branches, decides when blockers are cleared, and integrates reviewed work.
 
 Do not preserve the older self-claiming workflow. A top-level role session never claims a role by itself. It only accepts an explicit assignment from the total-control thread and verifies that the assignment exists in the project state.
+
+## Startup Mode Selection
+
+When a user asks to start, initialize, organize, or improve a large project, do not default directly to full parallel 野蜂. First classify the project into a startup level and record that decision.
+
+Use these levels:
+
+- `LEVEL_0_DISCUSS`: goals, architecture, task shape, or authorization are still unclear. Discuss, read local docs, and complete a startup intake or task template. Do not create governance files unless the user asks.
+- `LEVEL_1_GOVERNANCE_BOOTSTRAP`: the project is ready for durable coordination, but implementation tracks are not independent yet. Create or update governance docs, role pool proposals, task registry, and state skeletons. Keep roles `PLANNED`. Do not launch background Codex sessions, create role worktrees, merge branches, or start a heartbeat.
+- `LEVEL_2_SINGLE_THREAD_TOTAL_CONTROL`: the first implementation slice is dependency-heavy and should be advanced by the total-control thread directly while maintaining governance state. Do not launch parallel top-level roles unless the user explicitly authorizes an upgrade.
+- `LEVEL_3_FULL_PARALLEL_YEFENG`: multiple independent implementation tracks exist and the user has authorized full orchestration. Assign roles, create worktrees/branches, launch or resume role sessions, route communication, require reviewers, and integrate work.
+
+Only enter `LEVEL_3_FULL_PARALLEL_YEFENG` when all are true:
+
+1. the user has authorized 野蜂 execution, not just discussion;
+2. maximum parallel top-level role count is recorded;
+3. role scopes are independent enough to avoid constant contract churn;
+4. governance docs and machine state exist or can be created now;
+5. worktree/branch policy is recorded;
+6. secrets, external accounts, paid services, publication, and destructive operations remain gated by authorization policy.
+
+For early projects, governance layer does not always mean full background-role infrastructure. Create a lightweight governance bootstrap first and defer role launches until implementation tracks are independent.
+
+For startup-specific templates and prompts, read `references/startup.md`. For full governance skeletons and launch/resume prompt patterns, read `references/templates.md`.
 
 ## Core Commitments
 

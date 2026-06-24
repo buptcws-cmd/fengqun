@@ -2,6 +2,8 @@
 
 Use these templates only when the project lacks equivalent local docs. 野蜂 does not use self-claiming roles. The total-control thread assigns, launches, resumes, and integrates all top-level roles.
 
+For new-project startup levels, intake, level decisions, role-pool proposals, first-slice contracts, and upgrade checklists, use `startup.md` before using the full launch/resume patterns below.
+
 ## Total-Control Document Skeleton
 
 ```md
