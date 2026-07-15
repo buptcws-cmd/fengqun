@@ -1,7 +1,7 @@
 interface:
   display_name: "Series Task Workflow"
-  short_description: "Coordinate series tasks as reviewable checkpoints"
-  default_prompt: "Use $series-task-workflow to run this series as small, validated checkpoints."
+  short_description: "Coordinate governed series with reliable pause and closeout"
+  default_prompt: "Use $series-task-workflow to coordinate this series with bounded WIP, explicit review gates, and reliable pause/closeout."
 
 policy:
   allow_implicit_invocation: true
