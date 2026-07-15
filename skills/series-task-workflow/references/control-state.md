@@ -10,6 +10,7 @@ Read this reference when a series spans conversations, uses delegated workers/re
 - [Lifecycle](#lifecycle)
 - [Suggested machine state](#suggested-machine-state)
 - [Transition checks](#transition-checks)
+- [Reconciliation command](#reconciliation-command)
 - [Review and validation semantics](#review-and-validation-semantics)
 - [Progress checkpoint](#progress-checkpoint)
 
@@ -75,6 +76,8 @@ paused | handed-off -> claimed            (explicit resume, new epoch)
 
 Keep dynamic control facts compact. Adapt field names to local conventions.
 
+Keep only current in-scope candidates in `candidates`; move superseded or historical candidates to warm/cold evidence. Bind every candidate's worktree, branch, revision, validation, and review independently.
+
 ```json
 {
   "run_epoch": 4,
@@ -96,7 +99,9 @@ Keep dynamic control facts compact. Adapt field names to local conventions.
   "candidates": [
     {
       "id": "<task or candidate id>",
+      "status": "implementation",
       "worktree": "<absolute path>",
+      "branch": "<branch name>",
       "revision": "<git revision>",
       "validations": [
         {
@@ -137,10 +142,23 @@ Do not infer commit authority from an evidence-preservation requirement. Reuse e
 
 Increment `run_epoch` on pause, handoff, cancellation, or takeover. Do not reuse an earlier epoch on resume.
 
+## Reconciliation command
+
+From any worktree in the same Git repository, pass the absolute machine-state path explicitly:
+
+```powershell
+pwsh -NoProfile -File scripts/reconcile-series-state.ps1 -StatePath <absolute-control-state.json>
+```
+
+The script is read-only. It checks local `refs/heads/main`, each declared candidate worktree/branch/revision, exact-revision validation and review evidence, WIP budgets, claim epoch/lease state, and inactive/closed control states. It ignores Git worktrees that are not declared as current candidates, so unrelated work does not consume this series' WIP budget.
+
+Exit `0` means reconciliation completed with no issues. Exit `2` means the JSON result contains schema, identity, evidence, lease, WIP, or lifecycle issues; block state-changing actions until they are reconciled. Omitting mandatory `-StatePath` is rejected by PowerShell before reconciliation. The script never edits state, renews claims, increments epochs, switches branches, fetches remotes, or cleans worktrees.
+
 ## Review and validation semantics
 
 - Treat interrupted, cancelled, timed-out, or incomplete validation as not passed.
 - Bind passed validation and review to exact candidate revisions.
+- Append review records in observation order. For a terminal candidate, the last review entry is authoritative and must itself be `review passed`; an earlier pass never overrides a later failure or incomplete review.
 - Accept only literal `review passed` or `review failed` as a formal verdict.
 - Keep advisory output without a verdict as `reviewing` or `incomplete`.
 - After two substantive review failures on the same patch direction, stop version churn and revisit the contract/root-cause design before another candidate.

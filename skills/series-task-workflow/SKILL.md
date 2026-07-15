@@ -25,7 +25,7 @@ Treat coordination state as an execution boundary, not documentation commentary.
 - Group repeated symptoms by shared root cause. Keep one primary candidate per root-cause group unless an explicit comparison experiment requires more.
 - Treat a user progress or ETA request as an intermediate checkpoint. Report current evidence, then continue authorized work unless the user also pauses, redirects, or cancels it.
 
-For a series spanning multiple conversations, delegated workers, or multiple implementation worktrees, read [`references/control-state.md`](references/control-state.md) and require a small machine-readable control state or an existing local equivalent before further delegation. Treat unreconciled drift as a blocker to state-changing actions.
+For a series spanning multiple conversations, delegated workers, or multiple implementation worktrees, read [`references/control-state.md`](references/control-state.md) and require a small machine-readable control state or an existing local equivalent before further delegation. When PowerShell and Git are available, run the read-only [`scripts/reconcile-series-state.ps1`](scripts/reconcile-series-state.ps1) with an explicit `-StatePath` before state-changing actions. Treat a nonzero result or any reported issue as a blocker.
 
 ## Intake
 
