@@ -1,6 +1,6 @@
 ---
 name: series-task-workflow
-description: Coordinate user-provided multi-step or multi-module task series with a shared NEXT_STEPS-style registry, coordinator/worker subagent dispatch, AGENTS handoff instructions, per-task worktrees, proposals, validation, review, merge, cleanup, and optional continuation. Use when the user explicitly says "系列提案", asks to process a series, batch, roadmap, audit set, or "one by one" repair flow; when they want several conversations/agents/subagents to claim tasks independently or in parallel; when they say to create worktrees/proposals for related issues; or when they ask to continue a previously agreed series workflow. Do not use for a standalone report or one-off task unless the user asks to turn it into a series.
+description: Coordinate user-provided multi-step or multi-module task series with a shared NEXT_STEPS-style registry, coordinator/worker dispatch, claims, worktrees, validation, review, merge, cleanup, pause/handoff, and continuation controls. Use for a series, batch, roadmap, audit set, "one by one" repair flow, multi-conversation workflow, or any request to continue, pause, hand off, or resume an existing coordinated series. Do not use for a standalone report or one-off task unless the user asks to turn it into a series.
 ---
 
 # Series Task Workflow
@@ -11,6 +11,22 @@ Use this skill to turn a large task set into small, independently claimable chec
 
 When the user wants ongoing series execution and subagents are available, prefer a coordinator/worker shape: the main agent coordinates the registry, dependency graph, dispatch, review, merge and cleanup; worker subagents claim and implement individual runnable checkpoints in disjoint task worktrees. The coordinator must not silently become a worker for an already claimed checkpoint.
 
+When a repository uses `yefeng`, let `yefeng` own top-level roles, background processes, the communication bus, and total-control heartbeats. Use this skill for checkpoint, registry, claim, validation, review, merge, and cleanup discipline within that authority model.
+
+## Control Plane Invariants
+
+Treat coordination state as an execution boundary, not documentation commentary.
+
+- Keep one explicit coordinator. If the coordinator directly implements a checkpoint, record a deliberate mode switch, its scope, and when coordinator-only operation resumes.
+- Assign a monotonically increasing `run_epoch` to every long-running or multi-conversation series. Bind every claim, worker, reviewer, and continuation to that epoch.
+- Treat user instructions to pause, stop, clean up, hand off, or continue in a new conversation as control commands. Increment `run_epoch`, mark the series `paused`, `handed-off`, or `cancelled`, stop or invalidate old workers/heartbeats, and prohibit further writes until an explicit resume creates a current-epoch assignment.
+- Reconcile actual Git status, main revision, worktrees, active workers/processes, leases, review subjects, and required external/runtime identity before dispatch, resume, review, merge, cleanup, or a completion claim. Correct stale coordination state before executing new work.
+- Apply a default WIP budget of at most two active implementation worktrees, two pending reviews, and one integration/release batch unless the user or local authority records a different budget. Queue discoveries without creating more worktrees when the budget is full.
+- Group repeated symptoms by shared root cause. Keep one primary candidate per root-cause group unless an explicit comparison experiment requires more.
+- Treat a user progress or ETA request as an intermediate checkpoint. Report current evidence, then continue authorized work unless the user also pauses, redirects, or cancels it.
+
+For a series spanning multiple conversations, delegated workers, or multiple implementation worktrees, read [`references/control-state.md`](references/control-state.md) and require a small machine-readable control state or an existing local equivalent before further delegation. Treat unreconciled drift as a blocker to state-changing actions.
+
 ## Intake
 
 1. Classify the request.
@@ -19,6 +35,7 @@ When the user wants ongoing series execution and subagents are available, prefer
 2. Read the local authority for the target repo before changing files: root instructions, project context, OpenSpec rules for proposal/spec work, and any user-named guide.
    - If the repo defines an authorization policy with modes such as `AUTO`, `SCOPED`, `AGENT_REVIEW`, or `ASK`, that policy is the approval source of truth. Generic references to user approval mean the repo's configured approval gate, not necessarily a direct user question.
 3. Check current git status and active worktrees. Preserve unrelated changes and avoid taking over another active task unless the user names it and grants authority.
+   - Reconcile the registry or machine state against actual Git/worktree/claim state. Do not trust a recorded HEAD, worktree list, lease, or verdict merely because it is recent.
 4. Choose the coordination surface deliberately.
    - Use a user-named plan file when provided.
    - For a multi-conversation series, default to a repo-root `NEXT_STEPS.md` unless the repo already has a named equivalent.
@@ -48,9 +65,13 @@ The registry should record:
 - merge and cleanup status;
 - claimant-only next action and non-claimant/coordinator next action.
 
-Use compact statuses such as `unclaimed`, `claimed`, `blocked`, `proposal`, `proposal-review`, `approved`, `implementation`, `implementation-review`, `done`, and `merged`. Keep meanings explicit in the registry if the repo needs different names.
+Use compact statuses such as `unclaimed`, `claimed`, `blocked`, `proposal`, `proposal-review`, `approved`, `implementation`, `implementation-review`, `done`, `merged`, `paused`, `handed-off`, `cancelled`, `expired`, and `closed`. Keep meanings explicit in the registry if the repo needs different names.
 
 `done` means the worktree task passed its local validation/review. `merged` means it has been integrated back to the main branch and the registry has been updated. Do not treat `done` as merged.
+
+`closed` means the required integration or product-path outcome is complete, durable evidence is archived, claims/workers are terminal, and worktree/branch/artifact disposition is recorded. Do not call a task closed while its execution containers or evidence disposition remain unresolved.
+
+For long-running or delegated series, require a small machine-readable control-state file (or a repository-owned equivalent) for dynamic facts such as `run_epoch`, revisions, claims, worktrees, validation, reviews, and cleanup. Keep the Markdown registry as the concise human view. Resolve conflicts in this order: actual system state, machine control state, current evidence manifest, active registry, archive, conversation or worker self-report.
 
 Treat claims as leases, not permanent ownership. A claim lease records who is actively holding a checkpoint and how to find the work. Prefer a registry column named `Claim` instead of `Owner` or `Owner / Conversation`. If an existing registry already has an owner/conversation column, interpret it as the claim lease field until the registry can be safely renamed. The claim value must be stable and absolute, such as `claim: codex-20260520-1210-t1-preflight; since 2026-05-20T12:10+0800; last_seen=2026-05-20T13:00+0800; lease_expires=2026-05-20T17:00+0800`. For coordinator-dispatched workers, include both a worker token and parent coordinator token, such as `claim: codex-20260520-1430-t2-ai-guidance/worker-a; parent=codex-20260520-1425-series-coordinator; since 2026-05-20T14:30+0800`. If no platform-provided thread or agent id is available, generate a local unique token like `codex-YYYYMMDD-HHMM-<task-slug>`.
 
@@ -73,6 +94,7 @@ The exception is an explicitly dispatched reviewer for a review gate. A reviewer
 When claiming a task, update the registry before implementation with:
 
 - stable claim token and absolute claim time;
+- current `run_epoch` for multi-conversation or delegated series;
 - `last_seen`, `lease_expires`, and any heartbeat/waiting status when the repo uses leases;
 - intended branch/worktree;
 - scope and non-goals;
@@ -83,6 +105,8 @@ When claiming a task, update the registry before implementation with:
 Claim the smallest coherent checkpoint. Do not reserve the whole roadmap unless tasks are inseparable or the user explicitly asks this conversation to own the whole series.
 
 Refresh a claim lease at natural progress points: claiming, starting or resuming active work, dispatching or receiving a worker/reviewer result, before and after long commands, writing a handoff, changing blockers, or entering blocked wait. If local authority requires a keepalive heartbeat, use it exactly for liveness renewal. In yefeng projects this is `keepalive-hourly`: it runs about every hour, sets `lease_expires_at` to about `now + 4h`, and must not execute tasks, repeat commands, claim new work, or change scope.
+
+Before every state-changing action, verify that the claim epoch equals the current series epoch and the lease is live. Epoch mismatch, explicit pause/handoff, or an expired lease invalidates execution authority even if a worker process or worktree still exists.
 
 ## Coordinator Mode
 
@@ -101,6 +125,8 @@ Record the requested model/reasoning tier in the worker or reviewer prompt, and 
 Coordinator responsibilities:
 
 - read the local authority and registry before dispatch;
+- reconcile actual state and current epoch before dispatch, resume, review, merge, cleanup, or closeout;
+- enforce the recorded WIP budget before creating worktrees or reviews;
 - decide which checkpoints are runnable, blocked, claimant-only, or safe to parallelize;
 - choose and record each dispatched subagent's model/reasoning tier based on task risk;
 - avoid claiming worker tasks for the main agent unless the main agent will actually implement that one task;
@@ -115,6 +141,7 @@ Coordinator responsibilities:
 Worker responsibilities:
 
 - read the registry and claim lease assigned to them;
+- verify their assignment epoch before writes, long commands, commits, and handoff; stop on mismatch or pause/handoff state;
 - claim or confirm their assigned registry row before implementation, using a stable token, branch/worktree, scope, write surfaces, validation plan, and review gate;
 - stay inside the assigned worktree and declared write surfaces;
 - update their own task-local registry facts as work progresses, including status, evidence, blockers, and minimal review conclusions;
@@ -166,18 +193,36 @@ For file-changing tasks in a shared series, use a dedicated branch and worktree 
 - Keep writes inside the claimed task's declared surfaces.
 - Do not edit another task's worktree or revert changes from other conversations.
 - If the task only updates the registry itself, work on the main coordination branch when repo rules allow it.
+- Do not create an implementation worktree when the WIP budget is full. Read-only diagnosis and review normally reuse the assigned candidate worktree and do not create additional worktrees.
+- Treat worktrees as execution containers, never durable evidence stores. Prefer an existing commit/ref plus an evidence manifest before removing a rejected or paused worktree. For dirty WIP, create an explicitly labelled checkpoint commit only when local/user authority permits it; otherwise preserve an authorized patch plus every staged/unstaged/untracked file it does not capture, or a complete archive, with hashes and restore verification. A Git bundle preserves commits/refs, not dirty files. If no authorized durable form is available, quarantine the worktree and report cleanup blocked instead of destroying the only evidence.
 
 ## Execution
 
-1. Before entering any task worktree, confirm whether its `Claim` belongs to this agent/subagent. If not, stop normal execution for that task and follow the non-claimant/coordinator action.
+1. Reconcile actual state against the registry/control state and verify that the series is active, the epoch is current, the WIP budget allows the action, and the claim belongs to this agent/subagent. If any check fails, stop state-changing execution and record the drift or blocker.
 2. Create or switch to the correct dedicated worktree before task file edits when the series registry or repo rules require it.
 3. Before claiming or dispatching parallel work, check the dependency graph, serial boundaries, safe parallel groups, and shared write surfaces. Do not parallelize tasks when an unfinished prerequisite could change their assumptions or when active tasks would compete for the same contract, schema, module, or registry surface.
 4. For architecture, security, contract, large UX, or cross-module work, create an OpenSpec proposal first when the repo uses OpenSpec. Do not implement before the proposal is reviewed and the repo approval gate is satisfied.
 5. Keep edits scoped to the checkpoint. Do not refactor unrelated surfaces or rewrite active work from other conversations.
 6. Keep the registry current when scope, blockers, evidence, branch/worktree, dependency order, or review state changes. Do not wait until the end to record meaningful coordination facts.
-7. Validate with commands and manual product-path checks appropriate to the changed behavior. Treat tests and linters as evidence, not a substitute for required review.
-8. If review is required, obtain a post-repair review that explicitly passes before calling the checkpoint `done`.
+7. Validate with commands and manual product-path checks appropriate to the changed behavior. Treat interrupted, cancelled, timed-out, incomplete, or stale validation as not passed. Any source change invalidates validation evidence that does not bind the new exact revision.
+8. If review is required, send only a review-ready exact revision with its contract and validation evidence. Obtain a post-repair review that explicitly passes before calling the checkpoint `done`.
 9. When authorized to close out, commit, merge, update only stable coordination facts, remove disposable worktrees/branches/artifacts, mark the task `merged`, and then reassess the next unblocked checkpoint.
+
+## Review Contract
+
+Do not dispatch formal review until the candidate revision is frozen, required validation is complete, actual diff matches declared write surfaces, and known gaps are explicit. A reviewer receives the task contract, exact base and candidate revisions/diff, validation evidence, and necessary reproduction material—not the author's desired verdict.
+
+Require the reviewer to return:
+
+```yaml
+reviewed_revision: <exact revision>
+verdict: review passed | review failed
+findings: []
+residual_risk: <text>
+unlock_effect: <what this verdict permits or blocks>
+```
+
+A closed, timed-out, interrupted, advisory-only, or ambiguous review has no verdict and remains incomplete. Any candidate change invalidates the prior verdict. Use one independent full review by default; add another only when local authority or material architecture, security, authorization, state-machine, or cross-boundary risk justifies it.
 
 ## Completion And Cleanup
 
@@ -194,6 +239,14 @@ Before marking it `merged`, record:
 - final branch/worktree cleanup state;
 - downstream tasks unblocked or still blocked.
 
+Before marking it `closed`, record:
+
+- final required integration/runtime/product-path evidence;
+- archive/evidence-manifest location;
+- terminal claim, worker, reviewer, and process state;
+- worktree, branch, and temporary-artifact disposition;
+- a final reconciliation showing no unrecorded project-owned WIP.
+
 If a task is blocked, mark it `blocked`, state the blocker, and write the next concrete action. Do not leave a claimed task silently idle.
 
 When the whole series is complete, explicitly remind the user that the corresponding active registry is no longer needed for coordination and ask how they want it handled. Offer sensible choices: clear/reset a fixed root file such as `NEXT_STEPS.md`, delete a dedicated registry file, move it to an agreed archive location, or intentionally keep it if the user wants an in-file archive. Do not silently leave completed task rows, closeout summaries, or historical task tables in the active registry as the default. Once the user chooses cleanup, carry it out during closeout and record stable history in commits, PRs, archived OpenSpec changes, review artifacts, or user-named archives rather than copying completed series content forward.
@@ -201,6 +254,8 @@ When the whole series is complete, explicitly remind the user that the correspon
 ## Continuation
 
 Continue automatically while the user has asked for series execution until the series is complete, the user cancels continuation, or a hard blocker requires a user decision. A series is complete only when the registry marks all relevant checkpoints as `merged`, `abandoned`, or an explicit closed/completed equivalent.
+
+If the user pauses, asks for cleanup before a new conversation, or requests handoff, stop continuation immediately: increment the epoch, mark the control state, cancel/interrupt or invalidate active workers and heartbeats, preserve required evidence, and perform only the requested cleanup/handoff. Do not resume because an old task, automation, worker, or next-action field still says to continue. Resume only from an explicit user instruction and a new current-epoch assignment.
 
 Stop normal task execution and report the blocker when:
 
@@ -233,3 +288,5 @@ Heartbeat wakeups must be quiet and registry-driven: reread the local authority 
 ## User-Facing Closeout
 
 For each checkpoint, report the purpose, what changed or was proposed, validation evidence, minimal review conclusion, merge/cleanup state, and the next gated decision. Keep the report brief enough that the user can approve or redirect without reading a second audit log.
+
+For ongoing work or a progress request, report: current cycle/stage; evidence-backed changes since the last report; active owner/state/elapsed time; remaining gates; blockers/risks; current WIP/cleanup debt; next milestone; and P50/P80 ETA assumptions for that milestone. Do not invent a total ETA for an open-ended series. After reporting, continue authorized work unless the user paused, redirected, or cancelled it.
