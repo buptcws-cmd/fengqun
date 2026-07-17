@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "scope_id": "__SCOPE_ID__",
+  "run_epoch": 1,
+  "lifecycle_state": "ACTIVE",
+  "startup_level": "__STARTUP_LEVEL__",
+  "control_plane_mode": "external-git",
+  "control_repo_id": "__CONTROL_REPO_ID__",
+  "writer_fence": {
+    "writer_id": "__WRITER_ID__",
+    "fence_epoch": 1,
+    "lease_expires_at": null
+  },
+  "product_baselines": {
+    "__PRODUCT_REPO_ID__": {
+      "branch": "__PRODUCT_BRANCH__",
+      "commit": "__PRODUCT_BASELINE__"
+    }
+  },
+  "wip_budget": {
+    "active_implementation_worktrees": 0,
+    "pending_reviews": 0,
+    "integration_batches": 0
+  },
+  "open_operations": [],
+  "updated_at": "__CREATED_AT__"
+}

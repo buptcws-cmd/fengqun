@@ -1,6 +1,6 @@
 ---
 name: yefeng
-description: Use 野蜂 when a large project should be advanced by one total-control Codex thread that assigns roles, launches or resumes background Codex sessions, routes recorded communication, delegates subagents, reviews evidence, and integrates work through governed checkpoints. Also use when starting a new large project that needs a phased governance bootstrap before full parallel role execution.
+description: Use 野蜂 when a large or multi-module project needs one total-control Codex thread to bootstrap governance, assign roles, run or resume background sessions, route recorded communication, review evidence, and integrate governed checkpoints. Use it for embedded coordination and for independent external Git control repositories that keep operational state separate from authoritative product repositories.
 ---
 
 # 野蜂
@@ -17,7 +17,7 @@ Use these levels:
 
 - `LEVEL_0_DISCUSS`: goals, architecture, task shape, or authorization are still unclear. Discuss, read local docs, and complete a startup intake or task template. Do not create governance files unless the user asks.
 - `LEVEL_1_GOVERNANCE_BOOTSTRAP`: the project is ready for durable coordination, but implementation tracks are not independent yet. Create or update governance docs, role pool proposals, task registry, and state skeletons. Keep roles `PLANNED`. Do not launch background Codex sessions, create role worktrees, merge branches, or start a heartbeat.
-- `LEVEL_2_SINGLE_THREAD_TOTAL_CONTROL`: the first implementation slice is dependency-heavy and should be advanced by the total-control thread directly while maintaining governance state. Do not launch parallel top-level roles unless the user explicitly authorizes an upgrade.
+- `LEVEL_2_SINGLE_THREAD_TOTAL_CONTROL`: the first implementation slice is dependency-heavy and should be advanced by the total-control thread directly while maintaining governance state. Do not launch top-level roles while this level remains recorded; user authorization becomes effective only after recording the upgrade to Level 3.
 - `LEVEL_3_FULL_PARALLEL_YEFENG`: multiple independent implementation tracks exist and the user has authorized full orchestration. Assign roles, create worktrees/branches, launch or resume role sessions, route communication, require reviewers, and integrate work.
 
 Only enter `LEVEL_3_FULL_PARALLEL_YEFENG` when all are true:
@@ -33,6 +33,19 @@ For early projects, governance layer does not always mean full background-role i
 
 For startup-specific templates and prompts, read `references/startup.md`. For full governance skeletons and launch/resume prompt patterns, read `references/templates.md`.
 
+## Control Plane Placement
+
+Choose and record one topology during `LEVEL_0_DISCUSS` or `LEVEL_1_GOVERNANCE_BOOTSTRAP`:
+
+- `embedded`: governance, machine state, and product files share one Git repository. Preserve this mode for existing projects unless migration is explicitly authorized.
+- `external-git`: an independent Git control repository owns execution/governance state while one or more product repositories own product code, specifications, public contracts, tests, and releases.
+
+Prefer `external-git` for concurrent modules, frequently dirty product main worktrees, an existing embedded `.yefeng` owned by another series, private operational history, or multi-repository coordination. A plain external folder is runtime transport, not durable governance. A long-lived communication worktree is a fallback, not the default durable control plane.
+
+External mode records `control_plane_mode`, `control_repo_id`, `scope_id`, product repo IDs, integration branches, transport mode, and root-resolution policy. New embedded state should use `scope_id=default`; existing embedded state follows the read-compatibility rule below instead of being rewritten to satisfy the external schema. Relative governance paths resolve against `control_root`; product paths resolve against the named product repository or assigned product worktree. Store machine-local absolute roots in ignored local state and per-run assignments, not as logical identity.
+
+For `external-git`, read `references/external-control-repo.md` completely before bootstrap, dispatch, resume, integration, pause/recovery, or closeout. That reference overrides embedded path examples in `references/templates.md`.
+
 ## Core Commitments
 
 - The user interacts with the total-control thread by default.
@@ -45,10 +58,13 @@ For startup-specific templates and prompts, read `references/startup.md`. For fu
 - Cross-role facts, blockers, decisions, and evidence must be written to files. Hidden chat state is not governance.
 - Merge happens at the smallest verifiable integration point, not after every tiny action and not after unreviewed half-work.
 - The communication bus is dual-layer: machine-readable events plus human-readable views.
+- Shared tracked control state has one commit writer at a time. Enforce it with one repository-wide commit lock and expected-HEAD fence plus scope writer identity, lease, and monotonic `run_epoch`; Git's `index.lock` alone is not a semantic fence.
+- Roles treat outbox and logs as untrusted transport. Total-control validates identity and epoch, imports idempotently, and commits an event plus receipt before cleanup.
+- Product and control repositories are authoritative only for their own domains. A control-repository contract request becomes product truth only after the reviewed product change lands.
 
 ## Default Project Shape
 
-Create or maintain these files when a project uses 野蜂. Use local naming conventions if the repo already has equivalent docs, but migrate old self-claiming role docs into assignment semantics.
+Create or maintain these files under `control_root` when a project uses 野蜂. In embedded mode, `control_root` is the product root. Use local naming conventions if equivalent docs already exist, but migrate old self-claiming role docs into assignment semantics.
 
 - `docs/项目总览.md`
 - `docs/野蜂总控.md` or the repo's existing total-control document
@@ -67,6 +83,10 @@ Create or maintain these files when a project uses 野蜂. Use local naming conv
 
 Runtime-heavy run logs under `.yefeng/runs/` should normally be ignored by git. Commit durable state, summaries, event lines, and handoff reports; keep full stdout/stderr/prompt logs as local evidence unless the project explicitly wants them versioned.
 
+External mode namespaces durable and runtime state by `scope_id`, for example `.yefeng/series/<scope_id>/...`, `.yefeng/runs/<scope_id>/...`, and `.yefeng/outbox/<scope_id>/...`. Legacy unnamespaced embedded state remains valid: normalize an absent `scope_id` to `default` only in memory, never write it back or invent a missing epoch/identity merely for compatibility. Verify an existing run with the exact role, assignment, and run identity it actually records; ambiguity blocks resume. Every new or replacement assignment created after adoption receives a complete manifest without rewriting older tracked records.
+
+Process lifecycle is part of governance, not an afterthought. A role is not closed out merely because its branch is merged or its final message was read. Total-control must close completed app subagents, audit launched CLI process trees, and check the process budget before adding more background capacity when process counts are high. For Codex CLI roles, cleanup must match more than PID: Windows can reuse PIDs, so cleanup must verify command line, run directory, runner path, last-message/stdout/stderr paths, or real `codex exec` worktree evidence before stopping a process. Match `codex exec` as a command token such as `codex exec`, `codex.cmd exec`, or `codex.exe exec`; loose substrings in branch names like `codex/yefeng/...` or PowerShell words like `ExecutionPolicy` are not ownership evidence. Never kill generic Codex Desktop, Electron, MCP, or Node processes just because they are numerous; if a host-managed MCP process leak is suspected and cannot be mapped to a specific closed role/subagent, record it as a host-level cleanup issue, reduce further app-subagent fanout, and ask for explicit host-level cleanup authority before generic termination.
+
 Default `.gitignore` entries for 野蜂 projects should include:
 
 ```text
@@ -76,6 +96,8 @@ Default `.gitignore` entries for 野蜂 projects should include:
 ```
 
 The shared `.yefeng/events.jsonl`, `.yefeng/state/*.json`, and human-readable docs should remain trackable. Per-run assignment manifests and role-local outbox files are runtime transport. If a project wants assignment manifests versioned for audit, copy a compact assignment summary into `.yefeng/state/runs.json` or another tracked state file instead of merging `.yefeng/assignment.json` from a role worktree.
+
+Apply these ignore rules to the control repository in external mode. Do not modify a product repository's `.gitignore` merely to host control runtime data; use a role-local ignored transport only when the product repository already permits it or the product change is separately authorized.
 
 When upgrading an existing yefeng project:
 
@@ -97,6 +119,10 @@ Clarify only what is needed:
 - maximum parallel top-level role sessions;
 - model/reasoning tier policy for total-control, role sessions, workers, and reviewers;
 - whether git should be initialized now;
+- control-plane topology: `embedded` or `external-git`;
+- stable control/product repo IDs, scope IDs, integration branches, and local root binding;
+- whether the product repository may contain a small stable control-plane locator, or launches must always provide the control root;
+- transport mode and the sandbox capabilities required to read/write both roots;
 - whether every implementation role should use a worktree/branch, default yes;
 - what operations still require the user: secrets, external accounts, publication, destructive cleanup outside scope, or authority expansion.
 
@@ -117,6 +143,8 @@ The total-control thread owns orchestration by default:
 - merge reviewed role branches at verifiable integration points;
 - notify or resume affected roles after integration.
 
+In external mode, total-control is the only tracked-state writer in the control repository. Product repository writes still obey that repository's authority, branch, review, and merge rules. A module total-control thread may write only its assigned scope; only the global integrator writes shared control indexes and cross-module queues.
+
 Still require user confirmation for:
 
 - expanding the authorization policy itself;
@@ -127,60 +155,17 @@ Still require user confirmation for:
 
 Do not use `--dangerously-bypass-approvals-and-sandbox` for launched role sessions unless the authorization policy explicitly allows it for the project.
 
-## Total-Control Execution Turns
+## Total-Control Operations
 
-A total-control turn is executable by default, including prompts described as "check", "poll", "巡检", "resume", "continue", heartbeat, or automation. Those words mean inspect state and perform any authorized control action now. They do not mean read-only.
-
-Treat a total-control turn as read-only only when the user or automation prompt explicitly says `read-only`, `dry-run`, `no launch`, `do not start`, `do not resume`, `do not merge`, or when policy, evidence, capacity, conflict, or missing authority blocks execution.
-
-When the snapshot, task registry, or total-control document lists next safe total-control actions, treat them as a prioritized execution queue, not suggestions. A total-control turn is a drain loop, not a single-action tick. After every state-changing control action, recompute authoritative state and continue with the next authorized, unblocked, capacity-allowed action before final reporting. State-changing control actions include run completion processing, outbox import, blocker ruling, resume, launch, merge, baseline refresh, stable governance commit, and worktree cleanup.
-
-If no higher-priority completed run, outbox import, blocker ruling, resume, or merge consumes the current loop iteration and capacity remains, execute the first unblocked queue item. That can mean assigning a role, launching a role session, resuming a cleared role, integrating a merge-ready branch, or writing the concrete blocker that prevents execution. Then loop again. Independent launches may be batched up to the recorded parallelism limit; they should not be split across future heartbeats merely because one launch or merge already happened in the current turn.
-
-Repeatedly reporting "next action is X" while X is authorized, unblocked, and within the recorded parallelism limit is a 野蜂 failure. If execution is impossible, record the reason with `blocked_by`, `resume_when`, `required_evidence`, and `wake_target` instead of merely naming the future action.
-
-It is valid to wait for the next heartbeat only after the drain loop reaches quiescence. Quiescence means one of these is true:
-
-- no executable work remains after checking completed runs, outbox messages, merge-ready branches, ready-to-resume blockers, active directives, dirty stable governance files, and the prioritized queue;
-- remaining work is blocked by authorization, missing evidence, dependency order, conflict, or an explicit user decision;
-- max parallel capacity is filled by active role sessions and the remaining queue depends on those sessions or would exceed safe parallelism;
-- a role was just launched or resumed and no independent safe action remains;
-- the total-control turn is hitting a practical time budget, in which case record exactly what remains executable and why it was deferred.
-
-Do not use the heartbeat cadence as a batch boundary. A closeout that says "the next heartbeat will assign X" while X can be assigned safely now is incomplete.
-
-## Total-Control Heartbeat Lifecycle
-
-A total-control heartbeat is long-lived project infrastructure. Its job is to keep the total-control thread alive enough to notice new work, cleared blockers, finished role runs, user replies, and stale state. An idle heartbeat is a valid `IDLE_OK` result, not a reason to stop.
-
-Heartbeat cadence is a wakeup interval, not a work quantum. Each heartbeat must run the total-control drain loop until quiescence before waiting for the next cadence. The 20-minute wait, or any other cadence, begins only after all currently executable work has been completed, blocked with evidence, or delegated into running role sessions that fill the useful capacity.
-
-Do not delete, pause, or disable the total-control heartbeat merely because:
-
-- no role sessions are currently running;
-- the next queue is empty;
-- all currently known checkpoints are complete;
-- the turn would otherwise be an empty poll;
-- you want to avoid idle loops or "空转".
-
-Only stop or delete a total-control heartbeat when the user explicitly asks to stop, pause, delete, turn off, archive, or end the 野蜂 control loop, or when a recorded authorization policy requires shutdown and that policy was approved by the user. A completed checkpoint, clean working tree, or empty task queue is not enough.
-
-When a heartbeat finds no executable work, it should:
-
-1. verify there are no running roles, pending outbox messages, merge-ready branches, ready-to-resume blockers, active directives, or dirty stable governance files;
-2. refresh the status snapshot only if facts changed;
-3. report `IDLE_OK`, the facts checked, and what would wake new work;
-4. leave the heartbeat active at the existing cadence unless the user explicitly changes it.
-
-Do not create no-op commits just to prove the heartbeat ran. Do not call automation delete/update-to-paused as part of normal total-control closeout.
+For total-control checks, polls, continuation, heartbeat, integration, or closeout, read and follow `references/total-control-operations.md` completely. A total-control turn remains executable by default and drains every startup-level-authorized, unblocked, capacity-allowed action to quiescence. In external mode, reconcile and report control and product repositories separately.
 
 ## Role Assignment
 
-`docs/角色分配.md` is the human-readable assignment board. `.yefeng/state/roles.json` is the script-readable assignment state. Keep them in sync whenever the total-control thread changes role ownership or status.
+`docs/角色分配.md` is the human-readable assignment board. `.yefeng/state/roles.json`, or the namespaced external equivalent, is the script-readable assignment state. Resolve both under `control_root` and keep them in sync whenever total-control changes role ownership or status.
 
-The authoritative assignment state lives in the total-control workspace. A role worktree usually contains only the committed baseline copy of `.yefeng/state/roles.json`, so it may be stale at launch time. Before starting a role, total-control must write a per-run assignment manifest, preferably:
+The authoritative assignment state lives under `control_root`. An embedded role worktree may contain only a stale committed copy; an external-mode product worktree may contain no governance copy at all. Before starting a role, total-control must write a per-run assignment manifest under the control run root and optionally copy a runtime-only manifest into the product worktree.
 
-- in the total-control run directory: `.yefeng/runs/<role_id>/<run_id>/assignment.json`;
+- in the total-control run directory: `.yefeng/runs/<scope_id>/<role_id>/<run_id>/assignment.json` in namespaced mode, or the legacy unnamespaced path in compatible embedded mode;
 - and in the role worktree when useful: `.yefeng/assignment.json`.
 
 The launched role verifies the assignment manifest and prompt metadata. It should not fail merely because the committed role table inside its worktree still says `PLANNED`; it should report that discrepancy to total-control and avoid editing shared state directly.
@@ -208,6 +193,8 @@ A role row should record:
 - `lease_expires_at`
 - `last_output`
 
+External-mode role and run state also records `scope_id`, `run_epoch`, `control_repo_id`, `product_repo_id`, product baseline commit, product branch/worktree, and transport mode. Reject identity or epoch mismatches instead of guessing.
+
 Use these role states:
 
 - `PLANNED`: role exists but has not been assigned.
@@ -234,197 +221,15 @@ A role session must not:
 
 ## Process Backend
 
-Use `codex exec` as the default backend for background role sessions. The total-control thread may create helper scripts such as:
+Before launching, resuming, polling, or cleaning up background Codex CLI roles, read and follow `references/process-backend.md` completely. It defines explicit control/product/worktree roots, run identity, PID-safe cleanup, Windows command/encoding rules, and sandbox fallback. Never infer roots from the current directory or widen authority merely to write an external control repository.
 
-- `scripts/yefeng/start.ps1`
-- `scripts/yefeng/launch-role.ps1`
-- `scripts/yefeng/resume-role.ps1`
-- `scripts/yefeng/poll.ps1`
+## Worktrees, Integration, And Communication
 
-Prefer commands shaped like:
-
-```powershell
-Get-Content -LiteralPath <prompt-file> -Raw |
-  codex exec --json --skip-git-repo-check -C <role-worktree> -s <sandbox-mode> -o <control-root>\.yefeng\runs\<role_id>\<run_id>\last-message.md -
-```
-
-Resume only when a session ID is known:
-
-```powershell
-codex exec resume <session_id> "<resume prompt>"
-```
-
-In current Codex CLI, `codex exec resume` may not accept `-C`. Run the resume command with the process current directory set to the role's assigned worktree. If total-control resumes from the control root, the resumed role may correctly refuse to write because its sandbox writable root no longer matches its assignment. Always create the run log directory before launching a resume command so stdout/stderr redirection cannot fail before Codex starts.
-
-Do not pass interactive-only flags to `codex exec`. In particular, verify flags against `codex exec --help`; `-a/--ask-for-approval` may be accepted by interactive Codex but not by `codex exec`.
-
-Record stdout JSONL, stderr, process ID, run ID, last message path, prompt path, assignment manifest path, sandbox mode, started time, ended time, exit code, and discovered session ID under `.yefeng/runs/<role_id>/<run_id>/`.
-
-When `--json` is enabled, parse the first `thread.started` event and use its `thread_id` as the resumable session ID. Prefer JSON parsing over regex extraction. If no `thread.started` event appears, mark the run as non-resumable until proven otherwise.
-
-If a reliable session ID cannot be found, do not use broad `--last` in a shared Codex home. Either relaunch the role from recorded project state or isolate the role's `CODEX_HOME` so `--last` is unambiguous.
-
-When launching background helper processes on Windows, use `Start-Process` with `-WindowStyle Hidden` unless the user explicitly wants visible terminals. Prefer `pwsh` for helper scripts. If scripts must run under Windows PowerShell 5.1, keep script source ASCII-only or save it with a BOM; UTF-8-without-BOM scripts containing Chinese here-strings can fail before execution.
-
-Before writing launch/resume helper scripts on Windows, resolve the Codex CLI to an explicit command path and verify it. Prefer a working `codex.cmd` or npm shim over the WindowsApps `codex.exe` app alias; the alias can appear in `Get-Command codex` but fail with access denied inside background helper processes. Use the resolved command via `& $codexCommand exec ...` instead of bare `codex`, and record `codex_command` in run metadata. If a helper reports access denied for `WindowsApps\codex.exe`, treat it as a command-resolution failure, fix the launcher, and retry the role from the recorded assignment.
-
-```powershell
-$codexCommand = $null
-$cmdCandidates = @(
-  (Get-Command codex.cmd -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source),
-  (Get-Command codex -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)
-) | Where-Object { $_ }
-
-foreach ($candidate in $cmdCandidates) {
-  if ($candidate -like '*\WindowsApps\codex.exe') { continue }
-  try {
-    & $candidate --version > $null
-    $codexCommand = $candidate
-    break
-  } catch {}
-}
-
-if (-not $codexCommand) {
-  throw 'No usable Codex CLI command found; WindowsApps codex.exe app alias is not sufficient for background role launch.'
-}
-```
-
-For Windows projects with non-ASCII paths, filenames, or governance docs, put a UTF-8 prelude at the top of generated launch/resume helper scripts before `Get-Content`, `codex exec`, or log parsing:
-
-```powershell
-$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-[Console]::InputEncoding = $utf8NoBom
-[Console]::OutputEncoding = $utf8NoBom
-$OutputEncoding = $utf8NoBom
-$env:PYTHONIOENCODING = 'utf-8'
-try { chcp.com 65001 > $null } catch {}
-```
-
-Prefer explicit authoritative paths from prompts, assignment manifests, and docs over paths recovered from garbled console listings. If JSONL or stderr shows mojibake for Chinese file names, fix the launch script encoding and rerun a small probe before relying on that output for routing, blockers, or merges.
-
-Sandbox choice is part of the run record. On Windows, `-s workspace-write` may prevent spawned role sessions from using shell commands in some environments. If that happens and the authorization policy permits it, use a dedicated role worktree plus `-s danger-full-access` for that role run instead of using approval bypass flags. Record the reason and keep the write scope constrained by prompt, worktree, branch, and review gates.
-
-Before launching the first implementation role on Windows, total-control should run a tiny sandbox probe in a disposable directory:
-
-1. `codex exec --json -s workspace-write` with a prompt that asks the role to run a simple shell command such as printing the current directory.
-2. If the JSONL or final message shows `CreateProcessAsUserW failed: 5`, mark `workspace-write-shell=false` in `.yefeng/state/runs.json` or the status snapshot.
-3. For role sessions that need tests, builds, git commands, dependency inspection, or other shell work, launch them with `-s danger-full-access` inside their dedicated worktree, not in the project root.
-4. Keep read-only or document-only role sessions on the stricter sandbox when they do not need shell commands.
-
-This is a workaround for the Windows sandbox process-launch layer, not a relaxation of 野蜂 governance. The effective safety boundary becomes the dedicated worktree, narrow prompt scope, ignored runtime transport files, reviewer gate, and total-control integration review.
-
-App-server or remote-control tooling can be explored as an implementation backend, but 野蜂 must not depend on experimental desktop-thread visibility. Background CLI sessions are sufficient.
-
-## Worktrees And Integration
-
-Every top-level implementation role should have its own worktree and branch. Use conservative names such as:
-
-```text
-worktrees/<role_id>
-codex/yefeng/<role_id>/<checkpoint-or-date>
-```
-
-Document-only planning roles may share the main workspace only when the total-control thread records that their write scopes do not conflict.
-
-Role sessions work toward the smallest verifiable integration point:
-
-1. implement or update the assigned scope;
-2. run focused validation;
-3. deploy a reviewer subagent when required;
-4. fix reviewer findings and re-review when needed;
-5. write a handoff report or role result;
-6. mark the checkpoint `MERGE_READY` only when evidence exists;
-7. wait for total-control integration or continue a safe same-role task if one exists.
-
-The total-control thread integrates:
-
-1. inspect role diff and evidence;
-2. verify reviewer conclusion exists when required;
-3. check communication bus for unresolved blockers;
-4. remove or exclude runtime transport files such as `.yefeng/assignment.json` and `.yefeng/outbox/**` from the role branch unless explicitly archived;
-5. merge or rebase the role branch into the integration line;
-6. run integration validation;
-7. write stable facts to the registry and total-control doc;
-8. emit a `BASELINE_UPDATED` event;
-9. commit the stable governance updates (`.yefeng/state/**`, `.yefeng/events.jsonl`, task registry, assignment board, route views, directives, handoffs, and status snapshot) unless the project policy explicitly says those files are not versioned;
-10. update affected role worktrees with the new baseline, then resume from each role's own worktree if they need to continue.
-
-Do not merge unreviewed half-work merely to keep other roles current. Do not hold a complete reviewed unit indefinitely when it is already safe to integrate.
-
-After an integration checkpoint, a total-control closeout is not complete while stable governance files remain dirty. Either commit those stable facts, or record a concrete blocker explaining why they must stay uncommitted. Ignore runtime transport files only when they are intentionally gitignored or outside the versioned governance surface.
-
-When writing governance update scripts, prefer data structures and templates that are safe to rerun:
-
-- PowerShell `ConvertFrom-Json` returns `PSCustomObject`; assigning a property that does not already exist can fail. For fields that may be new, update an `[ordered]` hashtable before serialization, or use `Add-Member -Force` / `.PSObject.Properties.Remove(...)` plus `Add-Member` deliberately.
-- After rewriting `.yefeng/state/*.json`, read the JSON back and verify required fields such as `state`, `session_id`, `exit_code`, `role_commit`, `merge_commit`, and `codex_command` before committing.
-- For Markdown governance views, avoid double-quoted PowerShell here-strings that contain Markdown backticks or `$()` text. Prefer single-quoted here-strings with explicit placeholders such as `__ROLE_COMMIT__`, then replace placeholders with concrete values.
-- Read generated Markdown views back before commit and check that no unresolved placeholders or accidental script fragments remain, such as `__PLACEHOLDER__`, `$sessionId`, `$roleCommit`, or `$(`.
-- Run `git diff --check` and `git status --short` after staging stable governance files. A clean final status is evidence; a dirty stable governance file is a blocker, not a pass.
-
-## Communication Bus
-
-All cross-role communication goes through the recorded bus.
-
-Shared machine-readable source in the total-control workspace:
-
-- `.yefeng/events.jsonl`
-- `.yefeng/messages/<message_id>.json`
-
-Human-readable views:
-
-- `docs/角色通信/README.md`
-- `docs/角色通信/<role_id>.inbox.md`
-- `docs/角色通信/<role_id>.outbox.md`
-- `docs/角色通信/总控路由.md`
-
-A role may write a message event addressed to another role or to total-control. It may not resume the target role. Total-control routes the message and decides whether to:
-
-- answer directly;
-- append the message to a target inbox without waking the target;
-- resume the target role with the message;
-- convert the message into a blocker;
-- create or update a control directive;
-- ask the user.
-
-For implementation roles running in separate worktrees, prefer a local outbox:
-
-- role writes `.yefeng/outbox/<message_id>.json` inside its worktree;
-- total-control imports that outbox into the shared `.yefeng/events.jsonl` and human-readable route views;
-- total-control marks imported messages as routed, blocking, closed, or ready to wake a target role.
-
-After import, do not merge role-local `.yefeng/outbox/` files into the integration branch unless the project explicitly archives transport messages in git. The durable record is the imported event line and route view. This avoids re-importing stale transport files later.
-
-This avoids concurrent writes to the shared event log and prevents worktree-local copies of shared state from becoming false authority. Direct writes to the shared bus are allowed only when total-control explicitly grants a shared writable directory and serialization/locking is handled.
-
-Use these message types:
-
-- `QUESTION`
-- `ANSWER`
-- `BLOCKER`
-- `CONTRACT_CHANGE`
-- `REVIEW_REQUEST`
-- `REVIEW_RESULT`
-- `HANDOFF`
-- `BASELINE_UPDATED`
-- `RESUME_NOTICE`
-- `USER_DECISION_REQUIRED`
-- `DIRECTIVE`
-
-Every blocking message must include:
-
-- `blocking: true`
-- `blocked_role`
-- `blocked_checkpoint`
-- `blocked_by`
-- `resume_when`
-- `required_evidence`
-- `wake_target`
-
-The total-control thread is responsible for closing routed messages after the stable fact has been written to the registry, directive board, total-control doc, or role assignment state.
+Before creating product worktrees, integrating branches, importing outboxes, or changing cross-role communication state, read and follow `references/integration-and-transport.md` completely. For external mode, also apply the cross-repository protocol in `references/external-control-repo.md`.
 
 ## Control Directives
 
-`docs/总控指令.md` is the downward instruction channel from total-control to role sessions.
+`docs/总控指令.md` under `control_root` is the downward instruction channel from total-control to role sessions.
 
 Use a directive when:
 
@@ -438,7 +243,7 @@ Directives do not replace authorization or reviewer gates. They tell a role what
 
 ## Status Snapshot
 
-`docs/总控状态快照.md` is a short startup map for the total-control thread and role sessions. It should include:
+`docs/总控状态快照.md` under `control_root` is a short startup map for total-control and role sessions. It should include:
 
 - last updated time and updater;
 - current planning stance;
@@ -449,6 +254,8 @@ Directives do not replace authorization or reviewer gates. They tell a role what
 - active directives;
 - unprocessed handoff reports;
 - latest integration baseline;
+- exact control HEAD plus product repo IDs, branches, and baseline commits;
+- open cross-repository intents or reconciliation work;
 - next safe total-control action queue, as prioritized executable work rather than suggestions;
 - docs that must be read before changing state.
 
@@ -474,6 +281,7 @@ An assigned role prompt must state:
 - the role must not self-claim or reassign roles;
 - role ID, assignment ID, run ID, assignment manifest path, and session metadata if known;
 - working directory, worktree, and branch;
+- control-plane mode, control root/repo ID, scope ID, product root/repo ID, and exact product baseline;
 - allowed and forbidden write scopes;
 - current checkpoint;
 - files to read first;
@@ -501,6 +309,8 @@ Before resuming:
 4. update state to `READY_TO_RESUME`;
 5. send a concise resume prompt with the exact reason and required next output.
 
+For external mode, resume from the assigned product worktree while reading authority and state from the control root. Reconcile control HEAD, product HEAD, current epoch, incomplete intents, live processes, and transport before resuming. Never resume from `status.md` alone.
+
 If the previous session is not resumable, total-control may replace it by assigning a new session and recording the previous one as `EXPIRED` or `FAILED`.
 
 ## Subagents
@@ -517,6 +327,8 @@ Rules:
 - A reviewer must be independent from the worker or author it reviews.
 - A failed review leads to repair and re-review unless the failure needs a missing dependency, cross-role decision, policy expansion, or user decision.
 - Do not preserve long transcripts in governance docs. Keep minimal conclusions: reviewer, scope, verdict, required fixes, re-review status, and unlock/block effect.
+- Use only lifecycle operations exposed by the current collaboration host. After a terminal subagent result is consumed, record the verdict or handoff and stop scheduling it. If the host exposes explicit close/dispose, use it; otherwise terminal state is sufficient. Re-engage an idle agent only through the host's supported follow-up mechanism, and interrupt only a still-running agent that is no longer needed.
+- If many host-managed Codex Desktop, Electron, MCP, or Node processes remain after app subagents are closed, do not blindly kill them from 野蜂. First map them to a known closed role/subagent or record a host-level cleanup issue, reduce further app-subagent fanout, and ask for explicit host-level cleanup authority when a generic kill would disrupt active tools or other conversations.
 
 Risk tier guidance:
 
@@ -542,6 +354,8 @@ At minimum, create:
 - handoff inbox;
 - status snapshot when repeated startup would otherwise be expensive.
 
+External mode additionally requires an independent control Git repository, topology manifest, ignored local root binding, per-scope namespace, writer-fencing policy, and cross-repository recovery protocol. At Level 1, create these with every role still `PLANNED`; do not launch roles, create product implementation worktrees, start a heartbeat, or merge product/role branches. General automation authority cannot override the recorded startup level.
+
 Every proposal should include:
 
 ```md
@@ -565,25 +379,27 @@ When acting as the total-control thread, run the following as a loop until quies
 1. read the status snapshot first when present;
 2. read authorization, role assignment, task registry, directives, communication route view, event log tail, and unprocessed handoffs;
 3. process completed role runs;
-4. route messages;
-5. detect blockers that are cleared;
-6. resume roles whose conditions are satisfied;
-7. launch or resume every safe role that fits remaining capacity, including unblocked items in the next safe total-control action queue;
-8. integrate merge-ready work with evidence;
-9. update docs and machine state;
-10. refresh the status snapshot;
-11. commit stable governance updates or record the blocker that prevents committing them;
-12. verify the working tree is clean except for intentionally untracked/ignored runtime transport or unrelated user changes;
-13. tell the user what changed and what is still blocked.
+4. audit the process budget when counts are high, after resume, or before adding more background capacity;
+5. audit and clean process trees for terminal runs when they can be matched by command-line evidence;
+6. route messages;
+7. detect blockers that are cleared;
+8. resume roles whose conditions are satisfied;
+9. when the recorded startup level permits role execution, launch or resume every safe role that fits remaining capacity, including unblocked items in the next safe total-control action queue;
+10. integrate merge-ready work with evidence;
+11. update docs and machine state;
+12. refresh the status snapshot;
+13. commit stable control updates with an explicit allowlist, or record the blocker that prevents committing them;
+14. verify control Git and every affected product Git separately; preserve unrelated user changes;
+15. tell the user what changed and what is still blocked.
 
-After processing run results, messages, blockers, resumes, merges, and stable governance commits, restart the loop from the snapshot/authoritative state. Do not end with only a recommendation if an authorized queue item remains executable. Perform it, or write the concrete blocker that prevents it. If authorized work is ready, do it in this turn; the next heartbeat is only for new facts, running-role completions, or work that is genuinely blocked now.
+After processing run results, messages, blockers, resumes, merges, and stable governance commits, restart the loop from the snapshot/authoritative state. Do not end with only a recommendation if a startup-level-authorized queue item remains executable. Perform it, or write the concrete blocker that prevents it. If authorized work is ready, do it in this turn; an existing authorized heartbeat is only for new facts, running-role completions, or work that is genuinely blocked now.
 
 ## Running A Role Session
 
 When the prompt assigns a top-level role:
 
-1. verify the assignment from the prompt and per-run assignment manifest; treat worktree-local `docs/角色分配.md` or `.yefeng/state/roles.json` as possibly stale unless total-control says the worktree was refreshed after assignment;
-2. read authorization, total-control doc, task registry, directives, communication inbox, relevant proposal, and recent events;
+1. in external or new-format embedded mode, verify stable repo/scope IDs, current epoch, assignment, product baseline, and per-run manifest; for legacy embedded state, apply the read adapter above and verify every identity actually present, blocking ambiguous resume rather than synthesizing missing fields; in external mode do not expect governance files in the product worktree;
+2. read authorization, total-control doc, task registry, directives, inbox, relevant proposal, and recent events from the recorded control root;
 3. write only allowed role-local progress, handoff, and outbox files; shared state is updated by total-control unless the assignment explicitly grants a serialized shared state writer;
 4. process active directives or messages for this role before new work;
 5. deploy subagents when useful and allowed;
@@ -613,13 +429,22 @@ If safe same-role work remains, the role may continue it. If not, it should repo
 - Do not merge without the required reviewer and validation evidence.
 - Do not hide cross-role decisions in chat-only text.
 - Do not let Markdown views and JSON state drift silently; reconcile before launching or resuming roles.
+- Do not let two total-control writers rely on Git `index.lock`, independent per-scope locks, or per-scope HEAD copies; require one repository-wide commit lock and expected-HEAD fence plus the selected scope's lease and current epoch.
+- Do not treat an outbox payload as authority before validated import and durable receipt.
+- Do not write `MERGED` or `BASELINE_UPDATED` before the product commit exists and its ref/ancestry is verified.
+- Do not infer or initialize a control repository from a guessed sibling path; verify explicit binding and control repo ID.
+- Do not let a paused, handed-off, cancelled, or archived scope drain its old queue.
 - Do not write governance JSON with scripts that fail when a new field is needed; use rerunnable property update helpers.
 - Do not commit Markdown governance views with unresolved placeholders or broken inline code formatting.
-- Do not delete, pause, or disable the total-control heartbeat because the project is temporarily idle.
+- Do not delete, pause, or disable an existing startup-level-authorized total-control heartbeat merely because the project is temporarily idle.
 - Do not keep processed handoff reports as permanent state.
 - Do not use the communication bus as a substitute for total-control directives when a decision is required.
 - Do not edit outside a role's allowed scope.
 - Do not leave dead process/session records marked `RUNNING`.
+- Do not keep dispatching work to a terminal app subagent after its result has been consumed; explicitly close it only when the current host exposes that capability.
+- Do not leave safely matched terminal Codex CLI process trees alive after a role reaches `DONE`, `FAILED`, `EXIT_UNKNOWN`, or `EXPIRED`.
+- Do not kill generic host-managed Codex Desktop, Electron, MCP, or Node processes without command-line evidence tying them to a closed role/subagent or explicit user authorization for host-level cleanup.
+- Do not keep launching app subagents when process-budget audits show high duplicate host-managed MCP/Node command groups; throttle app-subagent fanout and prefer bounded CLI workers until the host recovers or the user authorizes host-level cleanup.
 - Do not continue after a policy-expanding decision without user approval.
 
 ## Expected Closeout
@@ -631,11 +456,15 @@ When finishing a 野蜂 step, report:
 - messages routed and blockers cleared;
 - directives opened, applied, closed, or still active;
 - reviewer/validation evidence that changed state;
+- completed app subagents closed after result consumption;
+- process cleanup audit result for terminal CLI runs, including dry-run/non-dry-run mode, matched PIDs stopped if any, and PID-reuse warnings;
+- process-budget audit result when counts were high, including whether remaining processes were yefeng-attributable or host-managed;
 - machine state and human docs updated;
 - status snapshot refreshed;
-- stable governance changes committed, or the exact blocker preventing that commit;
-- working-tree cleanliness for the project-owned integration surface;
-- heartbeat remains active, or the explicit user-approved reason it was stopped;
+- stable control changes committed, or the exact blocker preventing that commit;
+- control-repository commit/cleanliness and each affected product repository commit/cleanliness separately;
+- open integration intents, baseline drift, or reconciliation debt;
+- an authorized heartbeat remains active, was not enabled at the current startup level, or has an explicit user-approved reason it was stopped;
 - unresolved user decisions;
 - next total-control action.
 

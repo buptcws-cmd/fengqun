@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "control_root": "__CONTROL_ROOT__",
+  "product_roots": {
+    "__PRODUCT_REPO_ID__": "__PRODUCT_ROOT__"
+  }
+}

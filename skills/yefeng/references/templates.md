@@ -4,6 +4,41 @@ Use these templates only when the project lacks equivalent local docs. 野蜂 do
 
 For new-project startup levels, intake, level decisions, role-pool proposals, first-slice contracts, and upgrade checklists, use `startup.md` before using the full launch/resume patterns below.
 
+The recorded startup level is a hard upper bound. The authorization matrix grants authority only for operations already permitted by that level. At Level 1, roles remain `PLANNED`; role assignment/launch, implementation worktrees, heartbeat creation, and product or role merges remain forbidden until a reviewed level transition is recorded.
+
+For `external-git`, read `external-control-repo.md` first. Treat the templates below as embedded defaults unless they explicitly include `control_root` and `product_root`. Resolve governance paths under `control_root`, product paths under the named product repository/worktree, and run logs under the control root.
+
+## Contents
+
+- Total-control and authorization skeletons
+- Role assignment and machine state
+- Event and communication patterns
+- Task registry, directives, and handoffs
+- Assigned role, worker, reviewer, launch, and poll prompts
+- PowerShell update notes and proposal header
+
+## External Mode Required Overrides
+
+Before using any skeleton in `external-git`, add:
+
+```text
+control_plane_mode
+control_repo_id
+control_root (runtime/local binding)
+scope_id
+run_epoch
+role_id
+assignment_id
+run_id
+product_repo_id
+product_root (runtime/local binding)
+product_integration_branch
+product_baseline_commit
+transport_mode
+```
+
+Namespace roles, runs, events, messages, and runtime transport by `scope_id`. The product worktree may contain no governance snapshot. Only total-control writes tracked control state; roles use the assignment's exact ignored outbox path.
+
 ## Total-Control Document Skeleton
 
 ```md
@@ -111,12 +146,14 @@ safe_same_role_work_available:
 
 ## 3. 默认授权矩阵
 
+下表的 `AUTO` / `SCOPED` 只在当前已记录启动档位允许该操作时生效，不能越过启动档位。`LEVEL_1_GOVERNANCE_BOOTSTRAP` 中所有角色保持 `PLANNED`。
+
 | 操作 | 授权 | 自动范围 | 需要证据 | 越界处理 |
 | --- | --- | --- | --- | --- |
-| 总控分配角色 | AUTO | docs/角色分配.md; .yefeng/state/roles.json | assignment_id + 事件 | ASK |
-| 启动/恢复 Codex 角色会话 | AUTO | 已分配角色；max_parallel 内 | run_id + session_id/日志 | ASK |
-| 停止/替换失效角色会话 | SCOPED | EXPIRED/FAILED 或总控明确暂停 | 原 run 记录 | ASK |
-| 创建角色 worktree/branch | SCOPED | worktrees/<role_id>; codex/yefeng/<role_id>/** | git 输出 + 状态记录 | ASK |
+| 总控分配角色 | AUTO | 仅 LEVEL_3；docs/角色分配.md; .yefeng/state/roles.json | assignment_id + 事件 | ASK |
+| 启动/恢复 Codex 角色会话 | AUTO | 仅 LEVEL_3；已分配角色；max_parallel 内 | run_id + session_id/日志 | ASK |
+| 停止/替换失效角色会话 | SCOPED | 仅 LEVEL_3；EXPIRED/FAILED 或总控明确暂停 | 原 run 记录 | ASK |
+| 创建角色 worktree/branch | SCOPED | 仅 LEVEL_3；worktrees/<role_id>; codex/yefeng/<role_id>/** | git 输出 + 状态记录 | ASK |
 | 修改角色分配表 | SCOPED | 总控线程；角色仅能写本角色状态反馈字段 | 事件 + diff | ASK |
 | 写通信事件 | AUTO | .yefeng/events.jsonl; .yefeng/messages/** | message_id | ASK |
 | 导入角色本地 outbox | AUTO | 角色 worktree 的 `.yefeng/outbox/*.json` 到共享事件流 | message_id + source_file | ASK |
@@ -127,7 +164,7 @@ safe_same_role_work_available:
 | 部署 reviewer subagent | AUTO | 本角色审查门槛 | 最小审查结论 | ASK |
 | proposal 审核 | AGENT_REVIEW | 对应角色提案 | reviewer 结论 | 不通过则修复重审 |
 | checkpoint 实现 | AGENT_REVIEW | 已批准范围 | 测试/验证 + reviewer | 不通过则修复重审 |
-| merge 到集成线 | AGENT_REVIEW | MERGE_READY 角色分支 | diff + 测试 + reviewer | ASK |
+| merge 到集成线 | AGENT_REVIEW | 仅 LEVEL_3；MERGE_READY 角色分支 | diff + 测试 + reviewer | ASK |
 | 清理已合并 worktree/branch | SCOPED | 已合并且无未保存产物 | merge 记录 | ASK |
 | 安装依赖 | SCOPED | 已批准技术栈 | lockfile diff + 构建验证 | ASK |
 | 使用真实密钥/外部账号 | ASK | 无 | 用户确认 | FORBID |
@@ -286,11 +323,15 @@ try { chcp.com 65001 > $null } catch {}
 }
 ```
 
-Per-run assignment manifest, stored at `.yefeng/runs/<role_id>/<run_id>/assignment.json` and optionally copied to the role worktree as `.yefeng/assignment.json`:
+Per-run assignment manifest for every new assignment, stored at `.yefeng/runs/<role_id>/<run_id>/assignment.json` in compatible embedded mode or `.yefeng/runs/<scope_id>/<role_id>/<run_id>/assignment.json` in namespaced mode, and optionally copied to the role worktree as `.yefeng/assignment.json`. This is not a migration requirement for existing unnamespaced embedded records:
 
 ```json
 {
   "version": 1,
+  "control_plane_mode": "embedded",
+  "control_repo_id": "project-control",
+  "scope_id": "default",
+  "run_epoch": 1,
   "assignment_id": "assign-YYYYMMDD-HHMMSS-COORD-D",
   "run_id": "run-YYYYMMDD-HHMMSS-COORD-D",
   "role_id": "COORD-D",
@@ -298,6 +339,9 @@ Per-run assignment manifest, stored at `.yefeng/runs/<role_id>/<run_id>/assignme
   "checkpoint": "D0",
   "assigned_by": "INTEGRATOR",
   "control_root": "D:/project",
+  "product_repo_id": "project",
+  "product_root": "D:/project",
+  "product_baseline_commit": "<exact-sha>",
   "worktree": "D:/project-worktrees/COORD-D",
   "branch": "codex/yefeng/COORD-D/D0",
   "owned_scope": ["src/data/**", "docs/交接报告/**", ".yefeng/outbox/**"],
@@ -340,6 +384,7 @@ Each line in `.yefeng/events.jsonl` is one JSON object.
 Event types:
 
 ```text
+CONTROL_BOOTSTRAPPED
 ROLE_ASSIGNED
 ROLE_STARTED
 ROLE_OUTPUT
@@ -354,6 +399,14 @@ REVIEW_REQUEST
 REVIEW_RESULT
 HANDOFF
 BASELINE_UPDATED
+INTEGRATION_INTENT
+PRODUCT_COMMITTED
+PRODUCT_VERIFIED
+CONTROL_COMMITTED
+RECONCILIATION_REQUIRED
+IMPORT_RECEIPT
+RECOVERY_STARTED
+RECOVERY_COMPLETED
 RESUME_NOTICE
 USER_DECISION_REQUIRED
 DIRECTIVE
@@ -545,15 +598,22 @@ Use this for a top-level role session launched by the total-control thread.
 - role_name: <role_name>
 - assignment_id: <assignment_id>
 - run_id: <run_id>
-- assignment_manifest: <control-root>/.yefeng/runs/<role>/<run>/assignment.json
+- assignment_manifest: <exact-control-run-root>/assignment.json
+- control_plane_mode: <embedded-or-external-git>
+- control_repo_id: <control-repo-id>
+- control_root: <absolute-control-root>
+- scope_id / run_epoch: <scope-id> / <epoch>
+- product_repo_id: <product-repo-id>
+- product_root: <absolute-product-root>
+- product_baseline_commit: <exact-sha>
 - session_id: <session_id-if-known>
 - worktree: <worktree>
 - branch: <branch>
 - checkpoint: <checkpoint>
 
-你不能分配自己或其他顶层角色，不能唤醒/恢复其他角色，不能接第二个顶层角色。跨角色沟通必须写入本 worktree 的 `.yefeng/outbox/`；由总控导入共享通信总线并决定是否唤醒目标角色。
+你不能分配自己或其他顶层角色，不能唤醒/恢复其他角色，不能接第二个顶层角色。跨角色沟通必须写入 assignment manifest 指定的 outbox；由总控校验并导入共享通信总线。若 external control root 不可写，使用 worktree-local outbox，不得退化为隐藏聊天状态或自行扩大 sandbox。
 
-注意：你所在 worktree 中的 `docs/角色分配.md` 或 `.yefeng/state/roles.json` 可能是创建 worktree 时的旧快照。你应以本提示和 assignment manifest 为本次分配依据；如发现本地快照仍显示 `PLANNED`，记录到交接报告，不要修改总控状态文件。
+注意：embedded worktree 中的治理文件可能是旧快照；external-git worktree 中可能根本没有治理文件。external/new-format embedded 必须核对 scope/epoch；legacy embedded 缺少 scope 时只在内存映射为 `default`，不得回写，也不得伪造缺失 epoch。任何现有 role/assignment/run 身份缺失或歧义都必须停止恢复。以本提示、assignment manifest 和 control root 中当前权威状态为依据。不要修改总控 tracked state。
 
 允许写入：
 <owned_scope>
@@ -561,16 +621,17 @@ Use this for a top-level role session launched by the total-control thread.
 禁止写入：
 <forbidden_scope>
 
-先读取：
-1. docs/授权策略.md
-2. docs/角色分配.md
-3. .yefeng/state/roles.json
-4. docs/并行任务登记.md
-5. docs/总控指令.md
-6. docs/角色通信/<role_id>.inbox.md（若存在，可能是旧快照）
-7. docs/野蜂总控.md 或项目总控文档
+先从 `<control_root>` 读取：
+1. 授权策略
+2. 角色分配与当前 epoch 的机器状态
+3. 任务登记
+4. 总控指令
+5. 本角色 inbox
+6. 总控文档和状态快照
+7. 最新相关事件与未完成 operation
 8. <your-series-doc>
-9. .yefeng/events.jsonl 的最新相关事件
+
+再从 `<product_worktree>` 读取任务相关产品规范、源码和测试。
 
 如果存在点名你的 ACTIVE 指令或 blocking message，先处理它。
 
@@ -587,8 +648,7 @@ wake_target:
 safe_same_role_work_available:
 
 完成后：
-- 写交接报告到 docs/交接报告/YYYYMMDD-HHMM-<role>-<checkpoint>.md；
-- 写本地 outbox 事件到 .yefeng/outbox/<message_id>.json；
+- 把交接和 outbox 写入 assignment manifest 指定的 runtime transport 路径；
 - 汇报修改文件、验证证据、reviewer 结论、阻塞/恢复条件、建议总控回写；
 - 不要等待总控聊天回复做隐藏状态。
 ```
@@ -640,10 +700,14 @@ safe_same_role_work_available:
 
 ## Total-Control Launch Prompt Pattern
 
+Only use this launch pattern after the project has recorded `LEVEL_3_FULL_PARALLEL_YEFENG`.
+
 ```text
 作为野蜂总控线程，读取授权策略、角色分配、任务登记、总控指令、通信总线、状态快照和交接报告。
 
-这是执行轮次，不是只读计划。除非用户明确说 read-only/dry-run/no launch，否则你必须把已授权、未阻塞、容量允许的角色分配并启动起来；不要只列出准备启动的角色。
+先解析并验证 `control_plane_mode`、`control_repo_id/control_root`、`scope_id/run_epoch`、产品 repo 映射和精确 baseline。external-git 下从控制仓读取治理状态，使用显式 `git -C` 操作产品仓；不得从当前目录或兄弟目录猜测根。
+
+这是 LEVEL_3 执行轮次，不是只读计划。只有已记录启动档位允许、且操作已授权、未阻塞、容量允许时，才把角色分配并启动起来；不要让通用授权越过档位门槛。
 
 目标：
 <user goal>
@@ -666,6 +730,10 @@ safe_same_role_work_available:
 ```text
 作为野蜂总控线程，检查后台角色会话、通信总线、阻塞条件、交接报告、reviewer 证据和 merge-ready 分支。
 
+先取得唯一写者 fence，核对当前 epoch、预期 control HEAD、各 product HEAD 与所有未完成 operation。external-git 下分别报告控制仓和产品仓，不得把跨仓更新描述为原子提交。
+
+先强制执行已记录启动档位。LEVEL_1 只排空治理初始化动作；不得分配/启动角色、创建实现 worktree、启动 heartbeat 或 merge。LEVEL_2 仅允许总控单线程范围。
+
 这是执行轮次，不是只读巡检。除非用户明确说 read-only/dry-run/no launch/do not start/resume/merge，否则检查后必须进入排空循环：执行当前已授权、未阻塞、容量允许的控制动作；每完成一项就重新计算队列并继续，直到没有可执行动作、容量被运行角色占满、需要用户决策，或出现明确阻塞。
 
 请执行：
@@ -680,10 +748,10 @@ safe_same_role_work_available:
 9. 每次状态变化后重新进入步骤 1；刷新 docs/总控状态快照.md 时，只把仍未满足条件、容量不足、依赖运行中角色、需要 ASK 或因时间预算明确延后的项目留在队列中；
 10. 更新治理 JSON 时使用可重跑的属性更新方式；PowerShell 中不要假设 `ConvertFrom-Json` 后的对象能直接赋不存在的属性，必要时用 `[ordered]` hashtable 或 `Add-Member -Force`；
 11. 生成 Markdown 治理视图时，避免双引号 here-string 吃掉反引号或 `$()`；优先用单引号 here-string + `__PLACEHOLDER__` 替换，并读回检查没有 `__PLACEHOLDER__`、`$sessionId`、`$roleCommit`、`$(` 等残留；
-12. 将稳定治理事实提交到版本库：`.yefeng/state/**`、`.yefeng/events.jsonl`、任务登记、角色分配、通信路由、总控指令、交接摘要和状态快照。只有项目策略明确不版本化这些文件，或存在具体冲突/授权阻塞时，才可保留未提交，并必须写出 blocker；
-13. 运行 `git diff --check` 和 `git status --short` 验证项目集成面干净；若只有被刻意 gitignore 的运行运输文件可忽略，若稳定治理文件仍脏则本轮不能报告完整通过；
-14. 若没有任何可执行工作，报告 `IDLE_OK`，说明已检查 running roles、outbox、merge-ready、ready-to-resume、active directives、dirty governance，并保持总控心跳 active；
-15. 汇报本轮实际执行的动作、仍阻塞的问题、提交/合并 commit、工作区是否干净、心跳仍 active 和下一次触发条件；不要只汇报“下一步应做 X”。如果 X 已授权、未阻塞且容量允许，本轮必须执行 X；不要因为空闲而删除/暂停心跳。
+12. 将稳定治理事实以显式 allowlist 提交到控制仓：machine state、event/receipt、任务登记、角色分配、通信路由、指令、交接摘要和状态快照应形成同一稳定 snapshot；不得把未知 dirty 文件顺手提交；
+13. 分别运行 control repo 和每个 affected product repo 的 diff/status 检查。只有被刻意忽略的运行运输文件可忽略；不得用一个笼统 clean 结论替代双仓事实；
+14. 若没有任何可执行工作，报告 `IDLE_OK`，说明已检查 running roles、outbox、merge-ready、ready-to-resume、active directives、dirty governance；若已有当前档位授权的 heartbeat，则保持 active，否则报告 `not enabled by startup-level gate`；
+15. 汇报本轮实际执行的动作、仍阻塞的问题、提交/合并 commit、工作区是否干净、heartbeat 档位状态和下一次触发条件；不要只汇报“下一步应做 X”。如果 X 已被当前档位授权、未阻塞且容量允许，本轮必须执行 X；不要因为空闲而删除/暂停已有且获授权的 heartbeat。
 ```
 
 ### PowerShell Governance Update Notes

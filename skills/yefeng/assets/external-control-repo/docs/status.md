@@ -1,0 +1,20 @@
+# 总控状态快照
+
+- 更新时间：`__CREATED_AT__`
+- control plane：`external-git`
+- control repo：`__CONTROL_REPO_ID__`
+- scope：`__SCOPE_ID__`
+- run epoch：`1`
+- lifecycle：`ACTIVE`
+- startup level：`__STARTUP_LEVEL__`
+- product repo：`__PRODUCT_REPO_ID__`
+- product branch：`__PRODUCT_BRANCH__`
+- product baseline：`__PRODUCT_BASELINE__`
+- 当前阶段：治理初始化
+- 活动实现角色：无
+- 活动 product worktree：无
+- open operation：无
+- blocker：需要完成首个正式产品 checkpoint 的定义、独立评审与审批后才能实现
+- 下一安全动作：细化并评审 `docs/modules/__SCOPE_ID__/plan.md`，随后按产品仓治理约定创建正式变更 checkpoint
+
+本文件是短视图，不是审批源。冲突时以实际 Git/进程状态、机器控制状态和精确 revision 证据为准。

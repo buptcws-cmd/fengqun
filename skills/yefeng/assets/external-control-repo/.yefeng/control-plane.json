@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "control_plane_mode": "external-git",
+  "control_repo_id": "__CONTROL_REPO_ID__",
+  "project_id": "__PROJECT_ID__",
+  "locator_mode": "__LOCATOR_MODE__",
+  "default_transport_mode": "control-spool",
+  "active_scopes": [
+    "__SCOPE_ID__"
+  ],
+  "shared_writer": {
+    "scope_id": "__SCOPE_ID__",
+    "role_id": "INTEGRATOR"
+  },
+  "product_repositories": [
+    {
+      "repo_id": "__PRODUCT_REPO_ID__",
+      "integration_branch": "__PRODUCT_BRANCH__",
+      "product_truth": true
+    }
+  ]
+}
