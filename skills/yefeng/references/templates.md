@@ -348,7 +348,11 @@ Per-run assignment manifest for every new assignment, stored at `.yefeng/runs/<r
   "forbidden_scope": ["docs/角色分配.md", ".yefeng/state/**", "其他角色 worktree"],
   "outbox_dir": ".yefeng/outbox",
   "handoff_dir": "docs/交接报告",
+  "operator_permission_ceiling": "workspace-write",
   "sandbox_mode": "workspace-write",
+  "allowed_write_roots": ["D:/project-worktrees/COORD-D"],
+  "allowed_paths": ["src/data/**", "docs/交接报告/**", ".yefeng/outbox/**"],
+  "claude_write_boundary_acknowledged": true,
   "created_at": "YYYY-MM-DDTHH:mm:ssZ"
 }
 ```

@@ -1,126 +1,149 @@
-# 野蜂 Process Backend
+# 野蜂 Governed Process Backend
 
-Read this reference completely before launching, resuming, polling, or cleaning up background Codex CLI role sessions. Resolve every path from the recorded assignment; never infer product or control roots from the current directory.
+Read this reference completely before probing, launching, resuming, polling, or cleaning background CLI roles.
 
-## Contents
+## Roots And Authority
 
-- Root and path rules
-- Launch and resume
-- Run identity and cleanup
-- Windows command resolution and encoding
-- Sandbox probe
+Resolve every path from authoritative state:
 
-## Root And Path Rules
-
-Record these roots explicitly:
-
-- `control_root`: embedded project root or independent external Git control repository;
+- `control_root`: embedded product root or independent control Git repository;
 - `product_root`: authoritative product repository;
 - `role_worktree`: assigned product worktree;
-- `control_run_root`: `<control_root>/.yefeng/runs/<scope_id>/<role_id>/<run_id>` in namespaced mode, or the legacy unnamespaced path under the `SKILL.md` read-compatibility rule in embedded mode. Do not rewrite old records or synthesize missing epoch/identity fields.
+- `assignment_path`: tracked manifest under
+  `<control_root>/.yefeng/series/<scope_id>/state/assignments`;
+- `control_run_root`:
+  `<control_root>/.yefeng/runs/<scope_id>/<role_id>/<run_id>`.
 
-Keep helpers under the control root when using `external-git`, for example:
+Use `git -C <explicit-root>` for Git. Never infer a sibling control repository, product root, or cleanup root from the current directory.
 
-- `scripts/yefeng/start.ps1`
-- `scripts/yefeng/launch-role.ps1`
-- `scripts/yefeng/resume-role.ps1`
-- `scripts/yefeng/poll.ps1`
-- `scripts/yefeng/cleanup-completed-runs.ps1`
-- `scripts/yefeng/audit-process-budget.ps1`
+The assignment manifest binds version, mode, action, scope, epoch, assignment ID, role ID, backend, sandbox, workload class, worktree, prompt path/hash, write declarations, outbox, lease, and backend acknowledgements. It must be tracked at a clean control HEAD before dispatch.
 
-Use `git -C <explicit-root>` for every Git operation. Launch and resume from the role's product worktree. Store prompts, assignments, stdout, stderr, PIDs, and completion records under the control run root. Do not place runtime logs in the tracked product repository.
+Scope, assignment, role, and run IDs are path-free identifiers. Reject separators, colons, `.`/`..`, trailing dots, and Windows device aliases such as `CON`, `NUL`, `COM1`, and `LPT1`.
+
+## Supported Envelope
+
+The validated envelope supports:
+
+- `codex` launch/resume in read-only mode;
+- `claude` launch/resume in `plan + --safe-mode`;
+- empty external MCP profile;
+- tracked Level 2 conformance assignments;
+- capacity-aware parallel transport;
+- terminal completion, polling, resume, and exact cleanup.
+
+Level 3 authority is delegated by the operator. Record `operator_permission_ceiling`; require the requested mode to be at or below it. Prefer `workspace-write` in a dedicated worktree with explicit relative paths and post-run diff review. Use `danger-full-access` only when explicitly delegated and technically necessary; it cannot claim an exact path allowlist.
+
+## Minimal MCP
+
+Governed roles do not inherit optional MCP servers.
+
+Codex:
+
+```text
+codex exec --ignore-user-config --json --skip-git-repo-check ...
+```
+
+Claude:
+
+```text
+claude -p --output-format stream-json --verbose \
+  --permission-mode plan --safe-mode \
+  --mcp-config <empty-mcp.json> --strict-mcp-config ...
+```
+
+For an operator-authorized Claude write role, map `workspace-write` to
+`--permission-mode acceptEdits`; map explicitly delegated `danger-full-access` to
+`--permission-mode bypassPermissions`. Keep the empty strict MCP profile unless the assignment
+separately authorizes MCP capability. Record `claude_write_boundary_acknowledged=true` and reject
+any out-of-scope diff before review or integration.
+
+`--safe-mode` disables hooks, plugins, skills, project instructions, and other customizations. It still is not an OS filesystem sandbox. Record that distinction.
+
+## Dispatch Transaction
+
+One named cross-process mutex must cover:
+
+1. assignment resolution and tracked-clean verification;
+2. fail-closed active-run census;
+3. capacity, backend cap, and workload semaphore checks;
+4. launch-envelope creation;
+5. worker start;
+6. run-record creation.
+
+The launch envelope is mutable filesystem data, so pass its SHA-256 as an independent structured process argument. The worker reads the bytes once, validates that hash, strictly decodes UTF-8, and only then parses JSON.
+
+The prompt is also read once as bytes. Hash, strict UTF-8 decode, and execution must use those same bytes.
+
+Version 3 run and completion records bind:
+
+- control HEAD;
+- runner, worker, common-library, and policy hashes;
+- launch-spec hash;
+- assignment and prompt hashes;
+- scope, epoch, assignment, role, backend, session, PID, process start time;
+- worktree, sandbox, workload, MCP profile, and all artifact paths.
 
 ## Launch And Resume
 
-Use `codex exec` as the default background backend:
+Resolve a usable CLI command by executing `--version`; do not trust a WindowsApps alias that cannot run.
 
-```powershell
-Get-Content -LiteralPath <prompt-file> -Raw |
-  codex exec --json --skip-git-repo-check -C <role-worktree> -s <sandbox-mode> -o <control-run-root>\last-message.md -
-```
+Codex launch uses `codex exec`; resume uses `codex exec resume` from the assigned worktree with an explicit `sandbox_mode="read-only"` override. Parse the `thread.started` event to obtain the session ID.
 
-Resume only when a session ID is known:
+Claude launch creates an explicit UUID and uses `--session-id`; resume uses `--resume <session-id>`. Normalize the terminal `result` event into the run's last-message file.
 
-```powershell
-codex exec resume <session_id> "<resume prompt>"
-```
+Never resume from `--last` in a shared home. Resume only a completed parent whose session, backend, role, worktree, sandbox, workload, scope, and epoch match the new tracked resume assignment. Refuse when another active run owns the same backend session.
 
-Current Codex CLI may not accept `-C` on `codex exec resume`. Run resume with the process current directory set to the assigned product worktree. Always create the control run directory before redirecting stdout or stderr.
+## Terminal Evidence
 
-Do not pass interactive-only flags to `codex exec`. Verify flags against `codex exec --help`; `-a/--ask-for-approval` may exist for interactive Codex but not for `codex exec`.
+A completion file is not terminal merely because it exists.
 
-Record stdout JSONL, stderr, process ID, run ID, last-message path, prompt path, assignment path, sandbox mode, start/end time, exit code, and discovered session ID. When `--json` is enabled, parse the first `thread.started` event and use `thread_id` as the resumable session ID. If that event is absent, mark the run non-resumable until proven otherwise.
+Validate:
 
-## Run Identity And Cleanup
+- matching supported version;
+- every scalar and path binding;
+- version 3 provenance hashes;
+- `status` in `completed|failed`;
+- integer `exit_code`;
+- `completed` iff exit code is zero, `failed` iff nonzero;
+- parseable `started_at` and `ended_at`, with end not before start.
 
-Do not treat `Get-Process -Id <pid>` as proof that a role remains alive. A PID is valid only when the live command line still matches the recorded run directory, runner, stdout/stderr/last-message path, or actual `codex exec` command for the assigned product worktree. Treat a mismatched live PID as PID reuse and continue importing completion evidence.
+Poll, resume, active census, and cleanup all use the same terminal validator.
 
-After `DONE`, `FAILED`, `EXIT_UNKNOWN`, or `EXPIRED`, audit the process tree. Stop only processes tied to that run by command-line evidence. Prefer a dry run first. When supported, record targeted cleanup evidence such as:
+Historical terminal runs may remain as immutable evidence and do not count in the current epoch. A historical non-terminal run blocks dispatch until reconciled.
 
-```powershell
-cleanup-completed-runs.ps1 -DryRun -RecordDryRunState -RunId <run_id>
-```
+## PID-Safe Cleanup
 
-Shared run-state writes require a control-repository lock. Prefer one targeted state-recording command per run rather than concurrent writers.
+PID existence is never identity.
 
-When process counts are high, audit the process budget before adding capacity. Separate active 野蜂 runs, attributable terminal processes, and host-managed Codex Desktop/Electron/MCP/Node children. Redact secrets from command lines. Never kill unmatched host-managed processes without explicit user authority.
+1. Read the root CIM identity.
+2. Verify recorded start time and exact command fragments.
+3. Acquire and retain a `System.Diagnostics.Process` handle for the root before descendant census.
+4. Verify all captured descendant handles against the same census.
+5. Tree-kill the retained root first so it cannot spawn new children.
+6. Stop held descendants still alive.
+7. Repeat descendant census to convergence.
+8. Dispose every retained handle.
 
-If no reliable session ID exists, do not use broad `--last` in a shared Codex home. Relaunch from recorded state or isolate the role's `CODEX_HOME` so `--last` is unambiguous.
+Tests and finalizers follow the same rule. Do not check `HasExited` and then call `Stop-Process -Id`; use the retained `Process` object or the exact-identity cleanup primitive.
 
-Before recursive cleanup, resolve and verify that every target stays under the recorded control run root or assigned product worktree root. Never infer a cleanup root from an unresolved environment variable.
+Never kill generic Node, PowerShell, Codex Desktop, Claude, Electron, or MCP processes. For host-level cleanup, match exact known MCP command roots and act only with explicit authority.
 
-## Windows Command Resolution And Encoding
+## Windows Encoding And Process Start
 
-Launch background helpers with `Start-Process -WindowStyle Hidden` unless the user explicitly wants visible terminals. Prefer `pwsh`. If Windows PowerShell 5.1 is required, use ASCII-only script source or save Chinese-containing scripts with a BOM.
+Use structured argument arrays, not shell-concatenated strings. Start background helpers hidden unless the user requests a visible terminal. Redirect worker stdout/stderr to explicit files so the launcher can return without holding caller streams open.
 
-Resolve Codex CLI to an explicit working command. Prefer `codex.cmd` or an npm shim over the WindowsApps alias:
+Set UTF-8 console and pipeline encodings in worker scripts. Treat malformed UTF-8 in assignment, launch, or prompt bytes as a hard failure.
 
-```powershell
-$codexCommand = $null
-$cmdCandidates = @(
-  (Get-Command codex.cmd -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source),
-  (Get-Command codex -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)
-) | Where-Object { $_ }
+## Required Promotion Evidence
 
-foreach ($candidate in $cmdCandidates) {
-  if ($candidate -like '*\WindowsApps\codex.exe') { continue }
-  try {
-    & $candidate --version > $null
-    $codexCommand = $candidate
-    break
-  } catch {}
-}
+Before copying runner policy into this skill:
 
-if (-not $codexCommand) {
-  throw 'No usable Codex CLI command found; WindowsApps codex.exe app alias is not sufficient for background role launch.'
-}
-```
-
-Record `codex_command` in run metadata. Treat WindowsApps access denied as launcher resolution failure and retry the recorded assignment only after fixing the launcher.
-
-For non-ASCII paths or governance docs, prepend UTF-8 setup to generated launch/resume helpers:
-
-```powershell
-$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-[Console]::InputEncoding = $utf8NoBom
-[Console]::OutputEncoding = $utf8NoBom
-$OutputEncoding = $utf8NoBom
-$env:PYTHONIOENCODING = 'utf-8'
-try { chcp.com 65001 > $null } catch {}
-```
-
-Prefer authoritative paths from prompts, manifests, and control docs over garbled console listings. If logs contain mojibake, repair encoding and rerun a small probe before routing, merging, or cleanup.
-
-## Sandbox Probe
-
-Before the first implementation role on Windows, run a disposable `workspace-write` probe that prints the current directory. If it returns `CreateProcessAsUserW failed: 5`, record `workspace-write-shell=false` in run state or the status snapshot.
-
-Roles needing tests, builds, Git, or dependency inspection may use `danger-full-access` only inside their dedicated product worktree when authorization permits. Do not use approval-bypass flags.
-
-An external control repository may fall outside the role sandbox. Do not widen sandbox authority merely to write shared governance. Prefer, in order:
-
-1. the assignment's role-specific external spool when the sandbox permits it;
-2. a worktree-local ignored outbox imported by total-control;
-3. a final-message handoff imported by total-control.
-
-The effective safety boundary remains the dedicated worktree, narrow assignment, ignored transport, reviewer gate, and total-control integration review.
+- run PowerShell parsing;
+- run contract and governance tests repeatedly;
+- run dynamic process-tree cleanup;
+- run the control-repository validator;
+- launch Codex and Claude concurrently from a disposable clean Git repository;
+- resume both exact sessions;
+- prove terminal binding, expected markers, active census zero, targeted cleanup, and clean lab;
+- persist a commit-bound receipt with hashes;
+- obtain fresh independent exact review with literal `review passed`.

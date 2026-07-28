@@ -1,11 +1,11 @@
 ---
 name: yefeng
-description: Use 野蜂 when a large or multi-module project needs one total-control Codex thread to bootstrap governance, assign roles, run or resume background sessions, route recorded communication, review evidence, and integrate governed checkpoints. Use it for embedded coordination and for independent external Git control repositories that keep operational state separate from authoritative product repositories.
+description: Use 野蜂 when a large or multi-module project needs one total-control thread to bootstrap governance, assign roles across Codex CLI and Claude Code CLI, run or resume governed background sessions, route recorded communication, review evidence, and integrate checkpoints. Use it for embedded coordination and for independent external Git control repositories that keep operational state separate from authoritative product repositories.
 ---
 
 # 野蜂
 
-野蜂 is a governed multi-Codex work system. The user talks to one total-control thread. That total-control thread assigns roles, starts and resumes background Codex role sessions, routes recorded communication, manages worktrees and branches, decides when blockers are cleared, and integrates reviewed work.
+野蜂 is a governed multi-backend agent work system. The user talks to one total-control thread. That total-control thread assigns roles, starts and resumes governed Codex CLI or Claude Code CLI sessions, routes recorded communication, manages worktrees and branches, decides when blockers are cleared, and integrates reviewed work.
 
 Do not preserve the older self-claiming workflow. A top-level role session never claims a role by itself. It only accepts an explicit assignment from the total-control thread and verifies that the assignment exists in the project state.
 
@@ -16,7 +16,7 @@ When a user asks to start, initialize, organize, or improve a large project, do 
 Use these levels:
 
 - `LEVEL_0_DISCUSS`: goals, architecture, task shape, or authorization are still unclear. Discuss, read local docs, and complete a startup intake or task template. Do not create governance files unless the user asks.
-- `LEVEL_1_GOVERNANCE_BOOTSTRAP`: the project is ready for durable coordination, but implementation tracks are not independent yet. Create or update governance docs, role pool proposals, task registry, and state skeletons. Keep roles `PLANNED`. Do not launch background Codex sessions, create role worktrees, merge branches, or start a heartbeat.
+- `LEVEL_1_GOVERNANCE_BOOTSTRAP`: the project is ready for durable coordination, but implementation tracks are not independent yet. Create or update governance docs, role pool proposals, task registry, and state skeletons. Keep roles `PLANNED`. Do not launch background CLI sessions, create role worktrees, merge branches, or start a heartbeat.
 - `LEVEL_2_SINGLE_THREAD_TOTAL_CONTROL`: the first implementation slice is dependency-heavy and should be advanced by the total-control thread directly while maintaining governance state. Do not launch top-level roles while this level remains recorded; user authorization becomes effective only after recording the upgrade to Level 3.
 - `LEVEL_3_FULL_PARALLEL_YEFENG`: multiple independent implementation tracks exist and the user has authorized full orchestration. Assign roles, create worktrees/branches, launch or resume role sessions, route communication, require reviewers, and integrate work.
 
@@ -32,6 +32,20 @@ Only enter `LEVEL_3_FULL_PARALLEL_YEFENG` when all are true:
 For early projects, governance layer does not always mean full background-role infrastructure. Create a lightweight governance bootstrap first and defer role launches until implementation tracks are independent.
 
 For startup-specific templates and prompts, read `references/startup.md`. For full governance skeletons and launch/resume prompt patterns, read `references/templates.md`.
+
+## Backend And Capacity Policy
+
+Treat Codex CLI and Claude Code CLI as interchangeable transports only at the orchestration layer. Their permission implementations differ, but both receive authority by explicit delegation from the operator.
+
+- Every launch comes from a tracked assignment manifest bound to control HEAD, scope, epoch, assignment, role, backend, worktree, prompt hash, sandbox mode, workload class, and lease when applicable.
+- Default to the `minimal` MCP profile. Codex uses `--ignore-user-config`; Claude uses `--safe-mode`, an empty `mcpServers` file, and `--strict-mcp-config`.
+- Codex read-only uses the Codex sandbox. Claude read-only uses `plan + --safe-mode + strict empty MCP`; do not represent it as an OS filesystem sandbox.
+- Record an `operator_permission_ceiling` for every write-capable assignment. A role's requested mode must be less than or equal to that ceiling: `read-only < workspace-write < danger-full-access`.
+- The operator may delegate `workspace-write` or `danger-full-access` when their current authority permits it. Prefer the least authority that completes the task. For `workspace-write`, bind one dedicated worktree, explicit relative paths, no role-side commit/merge, and a total-control post-run diff review. For Claude, record `claude_write_boundary_acknowledged=true` because `acceptEdits` is a permission grant rather than an OS path sandbox.
+- Determine capacity from the current machine and live load, not a fixed folklore number. Record a normal target, hard cap, backend caps, and workload semaphores; refuse new dispatch in red state.
+- For the validated 8-core/16-thread, 61.7GB Windows host, use normal target `6`, hard cap `8`, Codex `4`, Claude `4`, CPU-heavy `2`, database integration `2`, and browser/Electron `1`. Recompute for other machines.
+
+Read `references/multi-backend-capacity.md` completely before setting backend policy, changing MCP defaults, or selecting machine parallelism.
 
 ## Control Plane Placement
 
@@ -49,7 +63,7 @@ For `external-git`, read `references/external-control-repo.md` completely before
 ## Core Commitments
 
 - The user interacts with the total-control thread by default.
-- The total-control thread is the only dispatcher for top-level roles.
+- The total-control thread is the only dispatcher for top-level roles, regardless of CLI backend.
 - Roles are assigned, not claimed.
 - Role sessions may communicate by writing recorded messages, but only the total-control thread may wake, resume, stop, replace, or reassign another top-level role.
 - Every top-level implementation role uses its own worktree and branch unless the total-control thread records a narrower read-only/document-only exception.
@@ -85,7 +99,7 @@ Runtime-heavy run logs under `.yefeng/runs/` should normally be ignored by git. 
 
 External mode namespaces durable and runtime state by `scope_id`, for example `.yefeng/series/<scope_id>/...`, `.yefeng/runs/<scope_id>/...`, and `.yefeng/outbox/<scope_id>/...`. Legacy unnamespaced embedded state remains valid: normalize an absent `scope_id` to `default` only in memory, never write it back or invent a missing epoch/identity merely for compatibility. Verify an existing run with the exact role, assignment, and run identity it actually records; ambiguity blocks resume. Every new or replacement assignment created after adoption receives a complete manifest without rewriting older tracked records.
 
-Process lifecycle is part of governance, not an afterthought. A role is not closed out merely because its branch is merged or its final message was read. Total-control must close completed app subagents, audit launched CLI process trees, and check the process budget before adding more background capacity when process counts are high. For Codex CLI roles, cleanup must match more than PID: Windows can reuse PIDs, so cleanup must verify command line, run directory, runner path, last-message/stdout/stderr paths, or real `codex exec` worktree evidence before stopping a process. Match `codex exec` as a command token such as `codex exec`, `codex.cmd exec`, or `codex.exe exec`; loose substrings in branch names like `codex/yefeng/...` or PowerShell words like `ExecutionPolicy` are not ownership evidence. Never kill generic Codex Desktop, Electron, MCP, or Node processes just because they are numerous; if a host-managed MCP process leak is suspected and cannot be mapped to a specific closed role/subagent, record it as a host-level cleanup issue, reduce further app-subagent fanout, and ask for explicit host-level cleanup authority before generic termination.
+Process lifecycle is part of governance, not an afterthought. A role is not closed out merely because its branch is merged or its final message was read. Total-control must close completed app subagents, audit launched CLI process trees, and check the process budget before adding more background capacity when process counts are high. Cleanup must match more than PID: Windows can reuse PIDs, so obtain and retain a verified root process handle before descendant census, terminate the root tree before convergence census, and verify command line, start time, run directory, runner path, and bound evidence. Never kill generic Codex Desktop, Claude, Electron, MCP, PowerShell, or Node processes merely because they are numerous; map exact command roots to a closed run or rely on explicit host-level cleanup authority.
 
 Default `.gitignore` entries for 野蜂 projects should include:
 
@@ -133,7 +147,7 @@ If the user indicates personal, long-term, architecture-sensitive, or not time-c
 The total-control thread owns orchestration by default:
 
 - create, update, and stop role assignments;
-- launch `codex exec` role sessions;
+- launch governed Codex CLI or Claude Code CLI role sessions;
 - resume role sessions by session ID;
 - create per-role worktrees and branches;
 - write the machine state, event log, role communication views, task registry, handoff reports, and control directives;
@@ -221,7 +235,7 @@ A role session must not:
 
 ## Process Backend
 
-Before launching, resuming, polling, or cleaning up background Codex CLI roles, read and follow `references/process-backend.md` completely. It defines explicit control/product/worktree roots, run identity, PID-safe cleanup, Windows command/encoding rules, and sandbox fallback. Never infer roots from the current directory or widen authority merely to write an external control repository.
+Before launching, resuming, polling, or cleaning up background CLI roles, read and follow `references/process-backend.md` completely. It defines explicit control/product/worktree roots, tracked assignments, minimal MCP envelopes, terminal evidence, epoch-safe census, PID-safe cleanup, Windows command/encoding rules, and backend-specific sandbox limits. Never infer roots from the current directory or widen authority merely to write an external control repository.
 
 ## Worktrees, Integration, And Communication
 
@@ -274,6 +288,8 @@ Before launching roles, total-control should:
 7. record run metadata;
 8. add `ROLE_ASSIGNED` and `ROLE_STARTED` events;
 9. report a concise launch summary to the user.
+
+Use a governed runner instead of ad hoc shell strings. The runner must serialize census/capacity/start/run-record creation, validate path-free identifiers, pass arguments structurally, bind the launch envelope by an independently supplied SHA-256, hash and decode the exact prompt bytes it executes, and record a versioned run/completion pair containing control HEAD and runner hashes. A completion file is terminal only after schema, binding, status, integer exit code, and time ordering pass.
 
 An assigned role prompt must state:
 
@@ -446,6 +462,7 @@ If safe same-role work remains, the role may continue it. If not, it should repo
 - Do not kill generic host-managed Codex Desktop, Electron, MCP, or Node processes without command-line evidence tying them to a closed role/subagent or explicit user authorization for host-level cleanup.
 - Do not keep launching app subagents when process-budget audits show high duplicate host-managed MCP/Node command groups; throttle app-subagent fanout and prefer bounded CLI workers until the host recovers or the user authorizes host-level cleanup.
 - Do not continue after a policy-expanding decision without user approval.
+- Map Claude `workspace-write` to `acceptEdits` and `danger-full-access` to `bypassPermissions` only when the assignment records an adequate operator ceiling and explicit acknowledgement. Exact paths define intended scope and audit expectations; total-control must reject out-of-scope diff after the run. Never let a backend self-escalate beyond the recorded ceiling.
 
 ## Expected Closeout
 
