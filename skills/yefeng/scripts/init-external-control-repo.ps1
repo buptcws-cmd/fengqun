@@ -355,13 +355,24 @@ try {
 
   $helperRoot = Join-Path $stagingRoot 'scripts\yefeng'
   New-Item -ItemType Directory -Path $helperRoot -Force | Out-Null
-  foreach ($helperName in @('enter-control-write.ps1', 'exit-control-write.ps1', 'recover-control-write.ps1', 'prepare-control-writer-takeover.ps1', 'validate-external-control-repo.ps1')) {
+  foreach ($helperName in @(
+    'enter-control-write.ps1',
+    'exit-control-write.ps1',
+    'recover-control-write.ps1',
+    'prepare-control-writer-takeover.ps1',
+    'validate-external-control-repo.ps1',
+    'message-common.ps1',
+    'publish-role-message.ps1',
+    'message-broker.ps1',
+    'receive-role-message.ps1'
+  )) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot $helperName) -Destination (Join-Path $helperRoot $helperName)
   }
 
   New-Item -ItemType Directory -Path (Join-Path $stagingRoot '.runtime') -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $stagingRoot ".yefeng\runs\$ScopeId") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $stagingRoot ".yefeng\outbox\$ScopeId") -Force | Out-Null
+  New-Item -ItemType Directory -Path (Join-Path $stagingRoot ".yefeng\broker\$ScopeId") -Force | Out-Null
   New-Item -ItemType Directory -Path (Join-Path $stagingRoot ".yefeng\quarantine\$ScopeId") -Force | Out-Null
 
   $writerFence = [ordered]@{

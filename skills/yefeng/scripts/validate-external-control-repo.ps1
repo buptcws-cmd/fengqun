@@ -313,7 +313,11 @@ $requiredFiles = @(
   'scripts/yefeng/exit-control-write.ps1',
   'scripts/yefeng/recover-control-write.ps1',
   'scripts/yefeng/prepare-control-writer-takeover.ps1',
-  'scripts/yefeng/validate-external-control-repo.ps1'
+  'scripts/yefeng/validate-external-control-repo.ps1',
+  'scripts/yefeng/message-common.ps1',
+  'scripts/yefeng/publish-role-message.ps1',
+  'scripts/yefeng/message-broker.ps1',
+  'scripts/yefeng/receive-role-message.ps1'
 )
 
 $requiredPathSafety = @{}
@@ -912,7 +916,7 @@ foreach ($relativePath in $boundedStableTextRelativePaths) {
 # Structural JSON, topology, scope, identity, and baseline contracts above remain
 # authoritative for rendered control state.
 
-foreach ($probe in @('.yefeng/local/roots.json', '.yefeng/local/locks/control-repo.lifecycle.guard', '.yefeng/runs/probe.txt', '.yefeng/outbox/probe.txt', '.yefeng/quarantine/probe.txt', '.runtime/probe.txt')) {
+foreach ($probe in @('.yefeng/local/roots.json', '.yefeng/local/locks/control-repo.lifecycle.guard', '.yefeng/runs/probe.txt', '.yefeng/outbox/probe.txt', '.yefeng/broker/probe.txt', '.yefeng/quarantine/probe.txt', '.runtime/probe.txt')) {
   & git -C $controlRootPath check-ignore -q --no-index $probe
   if ($LASTEXITCODE -ne 0) { $issues.Add("Expected ignored path is not ignored: $probe") }
 }
@@ -1172,7 +1176,7 @@ if ($RequireCommitted) {
       $issues.Add("Unable to determine ignore status for required stable file: $relative")
     }
   }
-  $trackedRuntime = Invoke-GitRead $controlRootPath @('ls-files', '.yefeng/local', '.yefeng/runs', '.yefeng/outbox', '.yefeng/quarantine', '.runtime')
+  $trackedRuntime = Invoke-GitRead $controlRootPath @('ls-files', '.yefeng/local', '.yefeng/runs', '.yefeng/outbox', '.yefeng/broker', '.yefeng/quarantine', '.runtime')
   if ($trackedRuntime) { $issues.Add("Runtime/local files are tracked: $trackedRuntime") }
   $fsck = & git -C $controlRootPath fsck --no-dangling 2>&1
   if ($LASTEXITCODE -ne 0) { $issues.Add("git fsck failed: $($fsck -join ' ')") }
