@@ -14,6 +14,8 @@
 - 活动实现角色：无
 - 活动 product worktree：无
 - open operation：无
+- broker：startup-level gate 未启用；Level 3 control-spool 才能启动
+- last promoted broker sequence：`0`
 - blocker：需要完成首个正式产品 checkpoint 的定义、独立评审与审批后才能实现
 - 下一安全动作：细化并评审 `docs/modules/__SCOPE_ID__/plan.md`，随后按产品仓治理约定创建正式变更 checkpoint
 

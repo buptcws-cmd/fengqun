@@ -63,6 +63,7 @@ Forbidden while the recorded level remains `LEVEL_1_GOVERNANCE_BOOTSTRAP`. Gener
 - launching background Codex sessions;
 - creating implementation worktrees;
 - enabling heartbeat automation;
+- starting the runtime message broker;
 - merging role branches;
 - changing product code or product normative specifications;
 - treating control-repository bootstrap as authority to launch roles.
@@ -86,7 +87,8 @@ Forbidden while the recorded level remains Level 2:
 
 - top-level role launches or resumes;
 - role-specific multi-worktree orchestration;
-- automatic heartbeat loops.
+- automatic heartbeat loops;
+- the runtime message broker.
 
 ### LEVEL_3_FULL_PARALLEL_YEFENG
 
@@ -106,6 +108,8 @@ Allowed:
 - require reviewer evidence;
 - integrate merge-ready work.
 
+For `external-git` plus `control-spool`, this is the first level that may start the per-scope single-writer message broker. Start it only after control-repository validation, exact role/run assignments, transport path binding, and the broker lifecycle probe pass. Its presence at lower levels is installation state, not execution authority.
+
 ## Startup Intake Template
 
 ```md
@@ -124,6 +128,8 @@ product_repositories（repo_id / integration branch / baseline）：
 产品事实位置：
 治理事实位置：
 transport_mode：control-spool / worktree-local
+broker_mode：disabled / control-spool-single-writer
+broker_poll_interval_ms：
 产品仓 locator 策略：tracked pointer / local binding / prompt-required
 第一条用户闭环：
 首个可验证切片：
@@ -206,6 +212,7 @@ Before upgrading from `LEVEL_2_SINGLE_THREAD_TOTAL_CONTROL` to `LEVEL_3_FULL_PAR
 - worktree/branch policy is recorded;
 - role launch/resume scripts or commands are known to work in the environment.
 - per-scope state and outbox paths cannot collide;
+- Level 3 `control-spool` broker passes exact-instance start/status, concurrent publish, delivery/read cursor, replay/idempotency, malformed/stale quarantine, and cooperative stop tests;
 - product baseline compare-and-swap and external control reconciliation have been tested;
 - pause/resume invalidates old epochs and late output safely.
 
@@ -219,6 +226,7 @@ When finishing startup work, report:
 - decisions still needed from the user;
 - exact upgrade condition for the next level;
 - whether any background sessions, worktrees, or heartbeats were started.
+- whether the runtime broker was started, its verified instance state, and why the startup level permitted it;
 - control-plane mode, control Git commit/cleanliness, and product Git commit/cleanliness separately;
 - whether product repositories were changed, and the exact locator change if one was authorized;
 - ignored runtime/local binding paths and any backup/remote gap.

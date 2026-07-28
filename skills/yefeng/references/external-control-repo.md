@@ -124,6 +124,7 @@ Path rules:
 │  │  └─ messages/
 │  ├─ runs/<scope_id>/<role>/<run>/    # ignored
 │  ├─ outbox/<scope_id>/<role>/<run>/  # ignored
+│  ├─ broker/<scope_id>/                # ignored runtime journal/projections/guard
 │  └─ quarantine/<scope_id>/           # ignored
 ├─ scripts/yefeng/                      # tracked writer and validation helpers
 └─ archive/
@@ -138,6 +139,7 @@ Recommended control-repository ignore rules:
 .yefeng/local/
 .yefeng/runs/
 .yefeng/outbox/
+.yefeng/broker/
 .yefeng/quarantine/
 .yefeng/assignment.json
 ```
@@ -219,7 +221,7 @@ Support two transport modes:
 - `control-spool`: role writes to an ignored role/run-specific spool under the external control root when sandbox permissions allow it;
 - `worktree-local`: role writes to its assigned product worktree's ignored `.yefeng/outbox/`, and total-control imports it.
 
-The assignment manifest gives the exact writable `outbox_dir`; the role must not guess. A role writes only its own `<scope>/<role>/<run>` directory. Prefer one message per file, write to a temporary name, then atomically rename to the final message ID. Total-control validates `scope_id`, `run_epoch`, `role_id`, `assignment_id`, `run_id`, `transport_mode`, and message ID before import and records deduplication state.
+The assignment manifest gives the exact writable `outbox_dir` and readable `inbox_dir`; the role must not guess. A role writes only its own `<scope>/<role>/<run>` directory. At Level 3, the bundled single-writer broker owns `.yefeng/broker/<scope_id>/` and serializes `control-spool` delivery; use `publish-role-message.ps1` and `receive-role-message.ps1` instead of editing runtime projections. The broker does not support `worktree-local` in version 1, so total-control imports that fallback explicitly. See `integration-and-transport.md` for the protocol, replay behavior, and timing rules.
 
 If a sandbox cannot write the external spool, fall back to `worktree-local`. Do not broaden the role's write authority merely for communication. Shared tracked event logs always have one writer: total-control.
 
@@ -267,7 +269,8 @@ Every launched role prompt and assignment manifest must contain absolute resolve
   "product_branch": "codex/<task>",
   "product_baseline_commit": "<sha>",
   "transport_mode": "control-spool",
-  "outbox_dir": "D:/project-control/.yefeng/outbox/delivery-series/COORD-D/run-YYYYMMDD-HHMMSS-COORD-D"
+  "outbox_dir": "D:/project-control/.yefeng/outbox/delivery-series/COORD-D/run-YYYYMMDD-HHMMSS-COORD-D",
+  "inbox_dir": "D:/project-control/.yefeng/broker/delivery-series/inbox/COORD-D"
 }
 ```
 
@@ -291,13 +294,13 @@ At `LEVEL_1_GOVERNANCE_BOOTSTRAP`:
 1. verify the requested control root does not exist, traverses no reparse point, and is outside every product repository;
 2. initialize an independent Git repository with a default branch;
 3. create the tracked topology, authorization, total-control, status, module, shared, archive, and machine-state skeletons;
-4. create ignored local root mapping and runtime transport directories;
+4. create ignored local root mapping and runtime transport directories, including the per-scope broker root;
 5. read product Git status and exact baseline without modifying product files;
 6. create scopes with roles in `PLANNED`, `run_epoch=1`, and no active claims;
 7. validate JSON, path containment, ignore rules, Git tracking, product/control identity, and startup level;
 8. commit the control bootstrap atomically;
 9. optionally add a reviewed stable pointer to the product repository through its normal Git workflow;
-10. do not launch roles, create product implementation worktrees, enable heartbeats, or merge product branches at Level 1.
+10. install and validate broker helpers, but do not start the broker, launch roles, create product implementation worktrees, enable heartbeats, or merge product branches at Level 1.
 
 Remote creation, pushing, cloud backup, or publication remains an external write and requires the applicable user authorization.
 
@@ -325,6 +328,9 @@ Remote creation, pushing, cloud backup, or publication remains an external write
 - [ ] Every registered product baseline resolves from its exact local integration-branch ref, not the current checkout, and every mapped product repository is validated.
 - [ ] Product/control/staging/cleanup path chains contain no reparse point and neither repository is nested in the other.
 - [ ] Every scope has isolated roles, runs, events, messages, and transport.
+- [ ] `.yefeng/broker/` is ignored, untracked, and owned only by one exact verified broker instance per active Level 3 scope.
+- [ ] Assignment manifests bind exact outbox and inbox paths; roles cannot write the broker journal or projections.
+- [ ] Broker start, publish, receive, replay repair, quarantine, status, and cooperative stop probes pass before parallel dispatch.
 - [ ] Shared control state has one writer.
 - [ ] One repository-wide commit lock and expected-control-HEAD fence plus scope writer identity, lease, and epoch fence concurrent and stale writers.
 - [ ] Crash recovery accepts only documented local-fence shapes, requires expired lease plus dead exact process identity, and converges through a reviewed epoch/writer transition.
@@ -335,7 +341,7 @@ Remote creation, pushing, cloud backup, or publication remains an external write
 - [ ] Other external side effects are intent-before-effect and recoverable.
 - [ ] Control and product Git statuses are reported separately.
 - [ ] Product repository remains unchanged during Level 1 unless a pointer change is separately authorized.
-- [ ] Runtime logs, local roots, outboxes, and assignments are ignored.
+- [ ] Runtime logs, local roots, outboxes, broker state, quarantine payloads, and assignments are ignored.
 - [ ] Tracked plans, state, events, decisions, and compact handoffs are committed.
 - [ ] Pause/resume follows the explicit lifecycle and increments the epoch.
 - [ ] Archive manifests and disaster-recovery limits are recorded.

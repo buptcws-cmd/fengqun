@@ -365,6 +365,52 @@ class MessageBrokerIntegrationTests(unittest.TestCase):
             "the runtime broker must not dirty tracked governance",
         )
 
+    def test_level_one_gate_refuses_broker_and_publishers(self) -> None:
+        control_path = (
+            self.control
+            / ".yefeng"
+            / "series"
+            / self.scope_id
+            / "state"
+            / "control.json"
+        )
+        control_state = self._read_json(control_path)
+        control_state["startup_level"] = "LEVEL_1_GOVERNANCE_BOOTSTRAP"
+        control_state["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._write_json(control_path, control_state)
+
+        start = self._ps(
+            self._control_script("message-broker.ps1"),
+            "-Mode",
+            "Start",
+            "-ControlRoot",
+            str(self.control),
+            "-ScopeId",
+            self.scope_id,
+            check=False,
+        )
+        self.assertNotEqual(start.returncode, 0)
+        self.assertIn("LEVEL_3_FULL_PARALLEL_YEFENG", start.stderr)
+
+        publish = self._publish(
+            "ROLE-A",
+            "PROGRESS",
+            "ROLE-B",
+            "must remain gated",
+            check=False,
+        )
+        self.assertNotEqual(publish.returncode, 0)
+        self.assertIn("LEVEL_3_FULL_PARALLEL_YEFENG", publish.stderr)
+
+        process_state = (
+            self.control
+            / ".yefeng"
+            / "broker"
+            / self.scope_id
+            / "process.json"
+        )
+        self.assertFalse(process_state.exists())
+
     def test_blocking_contract_and_assignment_path_escape_are_rejected(self) -> None:
         incomplete = self._publish(
             "ROLE-A",

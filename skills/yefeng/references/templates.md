@@ -35,6 +35,8 @@ product_root (runtime/local binding)
 product_integration_branch
 product_baseline_commit
 transport_mode
+outbox_dir
+inbox_dir
 ```
 
 Namespace roles, runs, events, messages, and runtime transport by `scope_id`. The product worktree may contain no governance snapshot. Only total-control writes tracked control state; roles use the assignment's exact ignored outbox path.
@@ -155,8 +157,8 @@ safe_same_role_work_available:
 | 停止/替换失效角色会话 | SCOPED | 仅 LEVEL_3；EXPIRED/FAILED 或总控明确暂停 | 原 run 记录 | ASK |
 | 创建角色 worktree/branch | SCOPED | 仅 LEVEL_3；worktrees/<role_id>; codex/yefeng/<role_id>/** | git 输出 + 状态记录 | ASK |
 | 修改角色分配表 | SCOPED | 总控线程；角色仅能写本角色状态反馈字段 | 事件 + diff | ASK |
-| 写通信事件 | AUTO | .yefeng/events.jsonl; .yefeng/messages/** | message_id | ASK |
-| 导入角色本地 outbox | AUTO | 角色 worktree 的 `.yefeng/outbox/*.json` 到共享事件流 | message_id + source_file | ASK |
+| 写通信事件 | AUTO | 总控写 tracked `.yefeng/events.jsonl`/`.yefeng/messages/**；Level 3 broker 仅写 ignored `.yefeng/broker/<scope>/**` | message_id | ASK |
+| 发布/导入角色消息 | AUTO | 角色仅发布 assignment-bound outbox；broker 校验并写 runtime journal；总控提升到 tracked 共享事件流 | message_id + source digest + broker sequence | ASK |
 | 更新通信 Markdown 视图 | AUTO | docs/角色通信/** | 对应 message_id | ASK |
 | 写交接报告 | AUTO | docs/交接报告/** | 报告文件 | ASK |
 | 写总控指令 | SCOPED | 总控线程创建/关闭；目标角色只写反馈字段 | directive_id | ASK |
@@ -190,7 +192,7 @@ try { chcp.com 65001 > $null } catch {}
 
 - 若 JSONL、stdout 或 stderr 中出现中文文件名乱码，不要用乱码路径当作权威事实；先按 manifest/prompt 中的显式路径读取，并修正脚本编码后重跑小探针。
 - 默认记录 sandbox mode。Windows 上总控启动第一批实现角色前应先运行一次 sandbox probe：用 `workspace-write` 启动极小 `codex exec`，要求打印当前目录；若出现 `CreateProcessAsUserW failed: 5`，把 `workspace-write-shell=false` 写入状态快照或 runs 状态。之后需要 shell 的实现角色在独立 worktree 内使用 `-s danger-full-access`，但不得使用 approval bypass。
-- `.yefeng/runs/`、`.yefeng/assignment.json`、`.yefeng/outbox/` 默认是本地运行/运输材料，建议加入 `.gitignore`；长期事实写入状态 JSON、事件 JSONL、通信视图和交接摘要。
+- `.yefeng/runs/`、`.yefeng/assignment.json`、`.yefeng/outbox/`、`.yefeng/broker/` 默认是本地运行/运输材料，建议加入 `.gitignore`；长期事实写入状态 JSON、事件 JSONL、通信视图和交接摘要。
 
 ## 4. 用户介入条件
 
@@ -347,6 +349,7 @@ Per-run assignment manifest for every new assignment, stored at `.yefeng/runs/<r
   "owned_scope": ["src/data/**", "docs/交接报告/**", ".yefeng/outbox/**"],
   "forbidden_scope": ["docs/角色分配.md", ".yefeng/state/**", "其他角色 worktree"],
   "outbox_dir": ".yefeng/outbox",
+  "inbox_dir": "D:/project/.yefeng/broker/default/inbox/COORD-D",
   "handoff_dir": "docs/交接报告",
   "operator_permission_ceiling": "workspace-write",
   "sandbox_mode": "workspace-write",
@@ -414,6 +417,9 @@ RECOVERY_COMPLETED
 RESUME_NOTICE
 USER_DECISION_REQUIRED
 DIRECTIVE
+PROGRESS
+CHECKPOINT
+HEARTBEAT
 ```
 
 ## Role Communication README
@@ -423,9 +429,9 @@ DIRECTIVE
 
 本目录是 `.yefeng/events.jsonl` 和 `.yefeng/messages/` 的人类可读视图。角色之间可以写消息，但不能互相唤醒或调度。所有恢复、停止、替换、重新分配都由总控线程执行。
 
-实现型角色通常在自己的 worktree 内写 `.yefeng/outbox/<message_id>.json`。总控线程导入这些 outbox 后，才写入共享 `.yefeng/events.jsonl` 和本目录视图。角色不要并发直接追加共享事件流，除非总控明确提供了序列化写入机制。
+Level 3 `control-spool` 角色使用 assignment manifest 和 `publish-role-message.ps1` 发布不可变消息；每个 scope 只有一个 broker 写 ignored runtime journal/inbox/receipt 投影。总控线程再把已接受消息提升为共享 `.yefeng/events.jsonl` 和本目录视图。角色不能并发直接追加共享事件流，也不能写 broker journal 或其他角色 inbox。
 
-导入完成后，除非项目明确要归档运输消息，否则不要把角色 worktree 的 `.yefeng/outbox/` 合并进主线。共享事件流和本目录视图才是长期事实。
+broker 接受回执只证明运行时运输持久化，不是治理授权。总控以 message ID、digest、assignment/run/epoch 和 broker sequence 幂等提升并提交后，共享事件流和本目录视图才成为长期事实。除非项目明确归档运输消息，不要把 `.yefeng/outbox/` 或 `.yefeng/broker/` 合并进主线。
 
 ## 文件
 
@@ -610,12 +616,14 @@ Use this for a top-level role session launched by the total-control thread.
 - product_repo_id: <product-repo-id>
 - product_root: <absolute-product-root>
 - product_baseline_commit: <exact-sha>
+- outbox_dir / inbox_dir: <exact-assignment-bound-paths>
+- broker_sequence_cursor: <last-processed-sequence>
 - session_id: <session_id-if-known>
 - worktree: <worktree>
 - branch: <branch>
 - checkpoint: <checkpoint>
 
-你不能分配自己或其他顶层角色，不能唤醒/恢复其他角色，不能接第二个顶层角色。跨角色沟通必须写入 assignment manifest 指定的 outbox；由总控校验并导入共享通信总线。若 external control root 不可写，使用 worktree-local outbox，不得退化为隐藏聊天状态或自行扩大 sandbox。
+你不能分配自己或其他顶层角色，不能唤醒/恢复其他角色，不能接第二个顶层角色。Level 3 control-spool 跨角色沟通必须通过 `scripts/yefeng/publish-role-message.ps1` 写入 assignment manifest 指定的 outbox，并用 `receive-role-message.ps1` 和自己保存的 broker sequence cursor 读取 inbox；不能直接写 broker journal/inbox/receipt。若 external control root 不可写，使用已记录的 worktree-local outbox，不得退化为隐藏聊天状态或自行扩大 sandbox。
 
 注意：embedded worktree 中的治理文件可能是旧快照；external-git worktree 中可能根本没有治理文件。external/new-format embedded 必须核对 scope/epoch；legacy embedded 缺少 scope 时只在内存映射为 `default`，不得回写，也不得伪造缺失 epoch。任何现有 role/assignment/run 身份缺失或歧义都必须停止恢复。以本提示、assignment manifest 和 control root 中当前权威状态为依据。不要修改总控 tracked state。
 
@@ -637,7 +645,7 @@ Use this for a top-level role session launched by the total-control thread.
 
 再从 `<product_worktree>` 读取任务相关产品规范、源码和测试。
 
-如果存在点名你的 ACTIVE 指令或 blocking message，先处理它。
+在启动/恢复、依赖共享契约前、最终验证前、交接前检查 inbox。如果存在点名你的 ACTIVE 指令或 blocking message，先处理它。BLOCKER/QUESTION/ANSWER/CONTRACT_CHANGE/REVIEW_REQUEST/REVIEW_RESULT/HANDOFF 在事实发生时立即发布；失败若影响其他角色或计划，用 BLOCKER 或 HANDOFF 明确说明；PROGRESS/CHECKPOINT 只在有意义边界发布；周期 HEARTBEAT 由 runner 发送，不为保活反复唤醒模型。
 
 任务：
 <specific assignment>
@@ -720,8 +728,8 @@ Only use this launch pattern after the project has recorded `LEVEL_3_FULL_PARALL
 1. 选择下一批可并行角色，数量不超过 <max_parallel>；
 2. 为实现型角色创建独立 worktree/branch；
 3. 写入 docs/角色分配.md 和 .yefeng/state/roles.json；
-4. 为每个角色生成 assignment.json 和 assigned role prompt；
-5. 用 codex exec 启动后台角色会话；不要传 `-a/--ask-for-approval`；
+4. 为每个角色生成包含精确 outbox_dir/inbox_dir 的 assignment.json 和 assigned role prompt；
+5. external-git control-spool 下先启动并验证当前 scope 的唯一 broker，再用 codex exec 启动后台角色会话；不要传 `-a/--ask-for-approval`；
 6. 从 JSONL 的 `thread.started.thread_id` 解析 session_id；
 7. 记录 run/session/process/log/last-message/prompt/assignment/sandbox；
 8. 写 ROLE_ASSIGNED / ROLE_STARTED 事件；
@@ -743,7 +751,7 @@ Only use this launch pattern after the project has recorded `LEVEL_3_FULL_PARALL
 请执行：
 1. 处理已完成 run；
 2. 更新 roles.json、runs.json、docs/角色分配.md；
-3. 导入角色 worktree 的 `.yefeng/outbox/*.json` 并路由 OPEN 消息；
+3. Level 3 control-spool 下验证 broker，按 tracked broker-sequence cursor 排空 runtime journal 并幂等提升到 tracked event/receipt/view；worktree-local 或 legacy transport 才直接导入 `.yefeng/outbox/*.json`；
 4. 判断 BLOCKED 角色的 resume_when 是否满足；
 5. 对 READY_TO_RESUME 角色，先更新其 worktree 基线，再从该 worktree 目录使用 session_id 恢复；
 6. 对 MERGE_READY 角色检查 reviewer/验证证据，排除 `.yefeng/assignment.json` 和 `.yefeng/outbox/**` 后集成；

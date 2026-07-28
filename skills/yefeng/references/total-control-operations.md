@@ -9,7 +9,7 @@ A total-control turn is executable by default, but the recorded startup level is
 Treat the snapshot's next-safe-action queue as executable work, not suggestions. Run a drain loop:
 
 1. reconcile actual product Git, control Git, worktrees, processes, roles, claims, and current epoch;
-2. process completed runs and import role outboxes;
+2. at authorized Level 3 `control-spool`, verify the exact broker instance, drain accepted runtime events after the tracked cursor, and promote them idempotently into tracked governance; otherwise import legacy/worktree-local role outboxes;
 3. route messages and decide whether blockers cleared;
 4. resume cleared roles;
 5. integrate review-ready product branches;
@@ -42,6 +42,8 @@ When idle:
 
 Do not create no-op commits to prove a heartbeat ran.
 
+The runtime message broker is separate long-lived infrastructure. It may run only for an active Level 3 `control-spool` scope and should remain active while that execution mode remains active. Its poll cadence is delivery latency, not a total-control heartbeat and not an LLM wake schedule. Verify it by instance ID, PID start time, command line, script path, and script hash. Stop it cooperatively on an authorized scope pause/archive/end or an explicit user/policy stop; never kill a generic PowerShell process. Broker acceptance never replaces the tracked total-control promotion commit.
+
 ## Cross-Repository Drain Loop
 
 For `external-git`, process control and product repositories separately:
@@ -65,4 +67,5 @@ At closeout, report:
 - terminal subagent/process cleanup evidence;
 - control-repository cleanliness and each affected product-repository cleanliness separately;
 - heartbeat state and unresolved user decisions;
+- broker state, last accepted/promoted sequence, quarantine/failure state, and whether a cooperative stop is required;
 - the next total-control action or the concrete blocker.

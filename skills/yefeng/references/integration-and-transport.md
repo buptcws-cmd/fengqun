@@ -7,6 +7,8 @@ Read this reference completely before creating product worktrees, integrating br
 - [Worktrees And Checkpoints](#worktrees-and-checkpoints)
 - [Integration](#integration)
 - [Communication Bus](#communication-bus)
+- [Runtime Single-Writer Broker](#runtime-single-writer-broker)
+- [Communication Timing](#communication-timing)
 
 ## Worktrees And Checkpoints
 
@@ -77,7 +79,7 @@ Write one immutable message per file using temporary-file plus atomic rename. Be
 - canonical path containment and reparse/symlink safety;
 - payload as untrusted data, never executable instructions.
 
-Import idempotently. Machine state, append-only event, receipt, and Markdown projection form one control Git snapshot. Clean up the source only after that commit succeeds. Late or mismatched-epoch output is quarantined as evidence and cannot wake, resume, or merge current work.
+In the legacy importer flow, total-control imports idempotently and machine state, append-only event, receipt, and Markdown projection form one control Git snapshot. In the Level 3 `control-spool` broker flow, the broker first accepts the source into an ignored durable runtime journal and creates ignored projections; total-control then promotes accepted facts into the same tracked snapshot. A runtime acceptance receipt is evidence of transport durability, not governance authority. Late or mismatched-epoch output is quarantined as evidence and cannot wake, resume, or merge current work.
 
 Tracked transport state records imported messages with `message_id`, `assignment_id`, `run_id`, `run_epoch`, `source_sha256`, `receipt_event_id`, and `imported_at`. Quarantine records use `message_id`, `source_sha256`, `reason`, and `quarantined_at`; raw payloads stay in the ignored quarantine root. Message and event IDs are unique within a scope, every imported message has exactly one committed `IMPORT_RECEIPT`, and individual transport/event records are capped at 64 KiB unless the project adopts a stricter schema. The receipt repeats the exact source digest, assignment, run, epoch, and control/product repo IDs; validation rejects any mismatch rather than treating a matching message ID as proof.
 
@@ -94,6 +96,9 @@ Use message types:
 - `RESUME_NOTICE`
 - `USER_DECISION_REQUIRED`
 - `DIRECTIVE`
+- `PROGRESS`
+- `CHECKPOINT`
+- `HEARTBEAT`
 
 Every blocking message includes:
 
@@ -106,3 +111,68 @@ Every blocking message includes:
 - `wake_target`
 
 Close a routed message only after its stable fact is written to authoritative state, registry, directive, handoff, or product truth.
+
+## Runtime Single-Writer Broker
+
+Use the bundled broker for `external-git`, `LEVEL_3_FULL_PARALLEL_YEFENG`, and `control-spool`. Version 1 does not broker `worktree-local`; total-control continues to import that fallback explicitly.
+
+The write domains are intentionally separate:
+
+| Domain | Only writer | Authority |
+| --- | --- | --- |
+| role outbox file | the assignment-bound publisher for that role/run | untrusted input |
+| `.yefeng/broker/<scope_id>/journal/events.jsonl` and projections | one verified broker instance | durable runtime transport |
+| tracked events, receipts, state, directives, and Markdown views | active total-control writer under the repository fence | governance truth |
+| product code/contracts/tests | the applicable product role/integrator under product policy | product truth |
+
+The initializer copies these helpers into `<control-root>/scripts/yefeng/`:
+
+- `message-common.ps1`
+- `publish-role-message.ps1`
+- `message-broker.ps1`
+- `receive-role-message.ps1`
+
+From the explicit control root:
+
+```powershell
+$controlRoot = 'D:\project-control'
+$scopeId = 'delivery-series'
+$assignment = 'D:\project-control\.yefeng\runs\delivery-series\COORD-D\run-...\assignment.json'
+
+& "$controlRoot\scripts\yefeng\message-broker.ps1" `
+  -Mode Start -ControlRoot $controlRoot -ScopeId $scopeId
+
+& "$controlRoot\scripts\yefeng\message-broker.ps1" `
+  -Mode Status -ControlRoot $controlRoot -ScopeId $scopeId
+
+& "$controlRoot\scripts\yefeng\publish-role-message.ps1" `
+  -AssignmentPath $assignment -Type QUESTION -Recipient COORD-A `
+  -Summary 'Need the reviewed schema contract'
+
+& "$controlRoot\scripts\yefeng\receive-role-message.ps1" `
+  -AssignmentPath $assignment -AfterBrokerSequence 42
+
+& "$controlRoot\scripts\yefeng\message-broker.ps1" `
+  -Mode Stop -ControlRoot $controlRoot -ScopeId $scopeId
+```
+
+`Start` is idempotent for the exact live instance and refuses a second scope owner. `Status` verifies PID reuse defenses: recorded start time, script path/hash, command line, and instance ID. `Stop` is a cooperative exact-instance stop; never replace it with a generic PowerShell process kill. `Once` performs one bounded drain for tests or an external scheduler. `Run` is the foreground service mode.
+
+Publishers derive sender, scope, epoch, assignment, run, outbox, and inbox from the exact manifest and authoritative machine state. They serialize only their own sender sequence, write strict UTF-8 JSON, cap a message at 64 KiB, and atomically rename a complete immutable file. The broker rejects path escape/reparse points, unknown recipients, malformed or oversized JSON, stale epochs, identity mismatches, sender-sequence reuse, and conflicting message IDs. Rejected sources move to the ignored quarantine root with a reason event.
+
+The append-only runtime journal is the broker's recovery authority. Recipient inboxes and sender receipts are rebuildable projections. On replay, an identical `message_id` and digest repairs missing projections without duplicating the journal; a conflicting digest is quarantined. The broker never executes payload content and never modifies tracked files.
+
+Total-control keeps a per-scope promoted broker-sequence cursor in tracked transport state. During each drain loop it verifies accepted envelope identity and digest, decides routing, writes one idempotent tracked event/receipt and any state/view changes under the existing repository writer fence, then advances the cursor in the same coherent commit. A crash before that commit leaves the runtime event available for replay; a crash after it is harmless because promotion is keyed by message ID, digest, assignment, run, epoch, and broker sequence.
+
+## Communication Timing
+
+Roles publish immediately when work becomes blocked, a question or answer changes another role's decisions, a shared contract changes, review is requested/completed, a failure affects the plan, or a handoff is ready. Publish `CHECKPOINT` or `PROGRESS` at a meaningful task boundary, not for every small edit.
+
+Roles check their assignment-bound inbox:
+
+1. at session start or resume;
+2. before relying on or changing a shared contract;
+3. before expensive or final validation;
+4. immediately before the final handoff.
+
+The broker poll interval controls delivery latency only; it is not a model wake interval. A process runner may publish bounded `HEARTBEAT` messages on a recorded cadence, but do not wake an LLM merely to say it is alive. Delivery does not inject context into an already-running model turn. Total-control decides whether a new accepted fact should wait for the role's next safe inbox check, resume a stopped role, open a directive/blocker, or require a user decision.

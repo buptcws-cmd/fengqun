@@ -73,7 +73,9 @@ For `external-git`, read `references/external-control-repo.md` completely before
 - Merge happens at the smallest verifiable integration point, not after every tiny action and not after unreviewed half-work.
 - The communication bus is dual-layer: machine-readable events plus human-readable views.
 - Shared tracked control state has one commit writer at a time. Enforce it with one repository-wide commit lock and expected-HEAD fence plus scope writer identity, lease, and monotonic `run_epoch`; Git's `index.lock` alone is not a semantic fence.
-- Roles treat outbox and logs as untrusted transport. Total-control validates identity and epoch, imports idempotently, and commits an event plus receipt before cleanup.
+- In `external-git` Level 3 with `control-spool`, one broker process is the only physical writer of ignored runtime communication state under `.yefeng/broker/<scope_id>/`. Roles publish immutable assignment-bound outbox files; they never append a shared journal or edit another role's inbox.
+- The broker validates, sequences, journals, and projects messages, but it never assigns, wakes, resumes, stops, replaces, merges, or writes tracked governance. Total-control remains the only dispatcher and the only writer of tracked control truth.
+- Roles treat outbox, broker projections, and logs as untrusted transport. Total-control promotes accepted runtime facts idempotently and commits the authoritative event, receipt, state, and human view before treating them as governance.
 - Product and control repositories are authoritative only for their own domains. A control-repository contract request becomes product truth only after the reviewed product change lands.
 
 ## Default Project Shape
@@ -94,12 +96,13 @@ Create or maintain these files under `control_root` when a project uses 野蜂. 
 - `.yefeng/events.jsonl`
 - `.yefeng/messages/`
 - `.yefeng/runs/`
+- `.yefeng/broker/`
 
 Runtime-heavy run logs under `.yefeng/runs/` should normally be ignored by git. Commit durable state, summaries, event lines, and handoff reports; keep full stdout/stderr/prompt logs as local evidence unless the project explicitly wants them versioned.
 
 External mode namespaces durable and runtime state by `scope_id`, for example `.yefeng/series/<scope_id>/...`, `.yefeng/runs/<scope_id>/...`, and `.yefeng/outbox/<scope_id>/...`. Legacy unnamespaced embedded state remains valid: normalize an absent `scope_id` to `default` only in memory, never write it back or invent a missing epoch/identity merely for compatibility. Verify an existing run with the exact role, assignment, and run identity it actually records; ambiguity blocks resume. Every new or replacement assignment created after adoption receives a complete manifest without rewriting older tracked records.
 
-Process lifecycle is part of governance, not an afterthought. A role is not closed out merely because its branch is merged or its final message was read. Total-control must close completed app subagents, audit launched CLI process trees, and check the process budget before adding more background capacity when process counts are high. Cleanup must match more than PID: Windows can reuse PIDs, so obtain and retain a verified root process handle before descendant census, terminate the root tree before convergence census, and verify command line, start time, run directory, runner path, and bound evidence. Never kill generic Codex Desktop, Claude, Electron, MCP, PowerShell, or Node processes merely because they are numerous; map exact command roots to a closed run or rely on explicit host-level cleanup authority.
+Process lifecycle is part of governance, not an afterthought. A role is not closed out merely because its branch is merged or its final message was read. Total-control must close completed app subagents, audit launched CLI process trees, and check the process budget before adding more background capacity when process counts are high. The broker has its own governed `Start`/`Status`/`Stop` lifecycle and per-scope exclusive guard; verify its recorded PID, start time, script path/hash, command line, and instance ID instead of killing a generic PowerShell process. Cleanup must match more than PID: Windows can reuse PIDs, so obtain and retain a verified root process handle before descendant census, terminate the root tree before convergence census, and verify command line, start time, run directory, runner path, and bound evidence. Never kill generic Codex Desktop, Claude, Electron, MCP, PowerShell, or Node processes merely because they are numerous; map exact command roots to a closed run or rely on explicit host-level cleanup authority.
 
 Default `.gitignore` entries for 野蜂 projects should include:
 
@@ -107,6 +110,7 @@ Default `.gitignore` entries for 野蜂 projects should include:
 .yefeng/runs/
 .yefeng/assignment.json
 .yefeng/outbox/
+.yefeng/broker/
 ```
 
 The shared `.yefeng/events.jsonl`, `.yefeng/state/*.json`, and human-readable docs should remain trackable. Per-run assignment manifests and role-local outbox files are runtime transport. If a project wants assignment manifests versioned for audit, copy a compact assignment summary into `.yefeng/state/runs.json` or another tracked state file instead of merging `.yefeng/assignment.json` from a role worktree.
@@ -207,7 +211,7 @@ A role row should record:
 - `lease_expires_at`
 - `last_output`
 
-External-mode role and run state also records `scope_id`, `run_epoch`, `control_repo_id`, `product_repo_id`, product baseline commit, product branch/worktree, and transport mode. Reject identity or epoch mismatches instead of guessing.
+External-mode role and run state also records `scope_id`, `run_epoch`, `control_repo_id`, `product_repo_id`, product baseline commit, product branch/worktree, transport mode, exact `outbox_dir`, and exact `inbox_dir`. Reject identity, path, or epoch mismatches instead of guessing.
 
 Use these role states:
 
@@ -301,7 +305,7 @@ An assigned role prompt must state:
 - allowed and forbidden write scopes;
 - current checkpoint;
 - files to read first;
-- communication bus rules, including whether the role writes local outbox or shared bus;
+- communication bus rules, including exact outbox/inbox paths, the publisher/receiver commands, a caller-held broker-sequence cursor, and trigger/check timing;
 - blocker reporting format;
 - subagent delegation allowance and reviewer requirement;
 - expected final output and handoff path.
@@ -393,20 +397,22 @@ Keep proposals conservative. A proposal is `DRAFT` until it has been reviewed un
 When acting as the total-control thread, run the following as a loop until quiescence rather than as a one-pass checklist:
 
 1. read the status snapshot first when present;
-2. read authorization, role assignment, task registry, directives, communication route view, event log tail, and unprocessed handoffs;
-3. process completed role runs;
-4. audit the process budget when counts are high, after resume, or before adding more background capacity;
-5. audit and clean process trees for terminal runs when they can be matched by command-line evidence;
-6. route messages;
-7. detect blockers that are cleared;
-8. resume roles whose conditions are satisfied;
-9. when the recorded startup level permits role execution, launch or resume every safe role that fits remaining capacity, including unblocked items in the next safe total-control action queue;
-10. integrate merge-ready work with evidence;
-11. update docs and machine state;
-12. refresh the status snapshot;
-13. commit stable control updates with an explicit allowlist, or record the blocker that prevents committing them;
-14. verify control Git and every affected product Git separately; preserve unrelated user changes;
-15. tell the user what changed and what is still blocked.
+2. read authorization, role assignment, task registry, directives, communication route view, tracked event tail, broker journal cursor, and unprocessed handoffs;
+3. at Level 3 `control-spool`, verify the exact per-scope broker identity and start it if the recorded policy authorizes it; never start it at Level 1 or Level 2;
+4. drain newly accepted broker events, reconcile them against current identity/epoch, and promote stable facts into tracked events, receipts, state, and human views under the existing writer fence;
+5. process completed role runs;
+6. audit the process budget when counts are high, after resume, or before adding more background capacity;
+7. audit and clean process trees for terminal runs when they can be matched by command-line evidence;
+8. route messages;
+9. detect blockers that are cleared;
+10. resume roles whose conditions are satisfied;
+11. when the recorded startup level permits role execution, launch or resume every safe role that fits remaining capacity, including unblocked items in the next safe total-control action queue;
+12. integrate merge-ready work with evidence;
+13. update docs and machine state;
+14. refresh the status snapshot;
+15. commit stable control updates with an explicit allowlist, or record the blocker that prevents committing them;
+16. verify control Git and every affected product Git separately; preserve unrelated user changes;
+17. tell the user what changed and what is still blocked.
 
 After processing run results, messages, blockers, resumes, merges, and stable governance commits, restart the loop from the snapshot/authoritative state. Do not end with only a recommendation if a startup-level-authorized queue item remains executable. Perform it, or write the concrete blocker that prevents it. If authorized work is ready, do it in this turn; an existing authorized heartbeat is only for new facts, running-role completions, or work that is genuinely blocked now.
 
@@ -415,14 +421,14 @@ After processing run results, messages, blockers, resumes, merges, and stable go
 When the prompt assigns a top-level role:
 
 1. in external or new-format embedded mode, verify stable repo/scope IDs, current epoch, assignment, product baseline, and per-run manifest; for legacy embedded state, apply the read adapter above and verify every identity actually present, blocking ambiguous resume rather than synthesizing missing fields; in external mode do not expect governance files in the product worktree;
-2. read authorization, total-control doc, task registry, directives, inbox, relevant proposal, and recent events from the recorded control root;
-3. write only allowed role-local progress, handoff, and outbox files; shared state is updated by total-control unless the assignment explicitly grants a serialized shared state writer;
-4. process active directives or messages for this role before new work;
+2. read authorization, total-control doc, task registry, directives, assignment-bound broker inbox, relevant proposal, and recent tracked events from the recorded control root;
+3. write only allowed role-local progress and handoff files, and publish messages with `publish-role-message.ps1`; never write the broker journal, inbox projections, another sender's outbox, or tracked shared state;
+4. keep a local `broker_sequence` cursor and check the inbox at session start, before relying on a shared contract, before final validation, and before handoff; process active directives or messages before new work;
 5. deploy subagents when useful and allowed;
 6. perform the assigned checkpoint inside the role's worktree/scope;
 7. validate;
 8. obtain reviewer evidence when required;
-9. write handoff/report/message events;
+9. publish `BLOCKER`, `QUESTION`, `CONTRACT_CHANGE`, `REVIEW_REQUEST`, `REVIEW_RESULT`, or `HANDOFF` immediately when that fact occurs; use `CHECKPOINT`/`PROGRESS` only at meaningful boundaries and let the process runner emit periodic `HEARTBEAT` without waking the model;
 10. finish with a concise state update for total-control.
 
 If blocked, the role must write:
@@ -446,7 +452,10 @@ If safe same-role work remains, the role may continue it. If not, it should repo
 - Do not hide cross-role decisions in chat-only text.
 - Do not let Markdown views and JSON state drift silently; reconcile before launching or resuming roles.
 - Do not let two total-control writers rely on Git `index.lock`, independent per-scope locks, or per-scope HEAD copies; require one repository-wide commit lock and expected-HEAD fence plus the selected scope's lease and current epoch.
-- Do not treat an outbox payload as authority before validated import and durable receipt.
+- Do not let two broker instances own the same scope, and do not let roles write shared broker state directly.
+- Do not treat an outbox payload, `MESSAGE_ACCEPTED` broker event, inbox projection, or runtime receipt as tracked authority before total-control promotion and a durable control commit.
+- Do not let the broker wake roles or make routing, blocking, assignment, resume, merge, or user-approval decisions.
+- Do not start the broker below `LEVEL_3_FULL_PARALLEL_YEFENG`; the presence of runtime directories or scripts does not grant execution authority.
 - Do not write `MERGED` or `BASELINE_UPDATED` before the product commit exists and its ref/ancestry is verified.
 - Do not infer or initialize a control repository from a guessed sibling path; verify explicit binding and control repo ID.
 - Do not let a paused, handed-off, cancelled, or archived scope drain its old queue.
@@ -471,6 +480,7 @@ When finishing a 野蜂 step, report:
 - role sessions launched, resumed, blocked, replaced, or completed;
 - worktrees/branches created or integrated;
 - messages routed and blockers cleared;
+- broker mode, verified instance state, accepted/quarantined counts, and the last promoted broker sequence;
 - directives opened, applied, closed, or still active;
 - reviewer/validation evidence that changed state;
 - completed app subagents closed after result consumption;
