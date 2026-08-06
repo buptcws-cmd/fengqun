@@ -384,13 +384,13 @@ try {
   $localFenceText = [System.IO.File]::ReadAllText($localFencePath, $utf8NoBom)
   $controlHeadText = [System.IO.File]::ReadAllText($controlHeadPath, $utf8NoBom)
   $lockJson = [System.IO.File]::ReadAllText($lockPath, $utf8NoBom)
-  $controlState = $controlStateText | ConvertFrom-Json -ErrorAction Stop
-  $rolesState = $rolesStateText | ConvertFrom-Json -ErrorAction Stop
-  $runsState = $runsStateText | ConvertFrom-Json -ErrorAction Stop
-  $transportState = $transportStateText | ConvertFrom-Json -ErrorAction Stop
-  $topology = $topologyText | ConvertFrom-Json -ErrorAction Stop
+  $controlState = ConvertFrom-ControlJson $controlStateText
+  $rolesState = ConvertFrom-ControlJson $rolesStateText
+  $runsState = ConvertFrom-ControlJson $runsStateText
+  $transportState = ConvertFrom-ControlJson $transportStateText
+  $topology = ConvertFrom-ControlJson $topologyText
   $localFence = ConvertFrom-ControlJson $localFenceText
-  $controlHeadState = $controlHeadText | ConvertFrom-Json -ErrorAction Stop
+  $controlHeadState = ConvertFrom-ControlJson $controlHeadText
   $lock = ConvertFrom-ControlJson $lockJson
   Assert-LocalFenceSchema $localFence
   Assert-WriterLockSchema $lock

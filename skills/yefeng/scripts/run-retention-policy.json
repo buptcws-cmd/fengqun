@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "dry_run_default": true,
+  "terminal_age_hours": 24,
+  "superseded_retention_days": 7,
+  "long_log_threshold_bytes": 1048576,
+  "scope_soft_cap_bytes": 536870912,
+  "overall_cap_bytes": 1073741824,
+  "receipt_max_bytes": 65536,
+  "keep_last_failures_per_group": 1,
+  "keep_final_passes_per_group": 1,
+  "apply_window_minutes": 60,
+  "max_candidates_per_plan": 64,
+  "allowed_leaf_logs": [
+    "stdout.jsonl",
+    "stderr.log",
+    "worker-stdout.log",
+    "worker-stderr.log"
+  ]
+}

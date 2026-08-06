@@ -6,6 +6,7 @@ Read this reference when a series spans conversations, uses delegated workers/re
 
 - [Authority order](#authority-order)
 - [Context budget](#context-budget)
+- [Incremental read protocol](#incremental-read-protocol)
 - [Handoff capsule](#handoff-capsule)
 - [Lifecycle](#lifecycle)
 - [Suggested machine state](#suggested-machine-state)
@@ -35,7 +36,20 @@ Keep series context in three layers so completed history does not crowd active d
 - **Warm:** the current cycle contract, exact revisions, validation/review evidence, reproduction material, and task-specific handoff detail. Load it only for the active checkpoint.
 - **Cold:** closed cycles, superseded candidates, historical logs, old runtime/package identities, and completed registries. Store it in indexed archives, commits, PRs, or evidence manifests and load it only for audit or reopening.
 
-As a default budget, keep the active registry near 100–120 lines, no more than two or three active WIP rows, and no more than five closed rows. Local authority may override these values. Archive a closed cycle when it closes instead of waiting for the registry to become large.
+As a default budget, keep the active registry at or below 100 lines, no more than two or three active WIP rows, and at most one just-closed row waiting for archive. Local authority may override these values. Archive stable closed rows, superseded candidates, and completed investigation detail immediately instead of waiting for the registry to become large.
+
+## Incremental read protocol
+
+The host may require the applicable `SKILL.md` to be read in full on every new turn. Keep that entrypoint compact and obey the host. This protocol reduces every other repeated read:
+
+1. Start with actual system state, the machine control state, and the compact hot registry.
+2. Record `instruction_fingerprints` as SHA-256 values for authority/reference files after their latest full required read. If a fingerprint changes, reread that file completely before acting under it. A matching fingerprint permits reuse only within the same continuing context and never overrides a host rule requiring a fresh read.
+3. Record `event_cursors` for append-only events, messages, logs, and review queues. Read strictly after the accepted cursor, verify continuity, then advance the cursor only after the new facts are reconciled into current truth.
+4. Load warm material only for the next action: the active checkpoint contract, exact candidate diff, current evidence, and applicable action-specific reference.
+5. Load cold history only when reopening, auditing provenance, resolving a contradiction, or restoring evidence. Search/index first; do not reread an archive from the beginning by default.
+6. At the end of a stable transition, refresh the hot registry, fingerprints, cursors, archive pointers, and one concise `last_stable_summary`.
+
+Fingerprints and cursors are cache-validation aids, not authority. A hash match does not prove a dynamic fact is still true; Git, process, API, runtime, claim, and lease facts must still be reconciled.
 
 ## Handoff capsule
 
@@ -88,6 +102,24 @@ Keep only current in-scope candidates in `candidates`; move superseded or histor
     "pending_reviews": 2,
     "integration_batches": 1
   },
+  "cycle_budget": {
+    "candidate_attempt_limit": 2,
+    "review_failure_limit": 2,
+    "candidate_attempts": 0,
+    "review_failures": 0
+  },
+  "context_checkpoint": {
+    "instruction_fingerprints": {
+      "AGENTS.md": "<sha256>",
+      "NEXT_STEPS.md": "<sha256>"
+    },
+    "event_cursors": {
+      "events.jsonl": 41,
+      "review_queue": "<opaque-cursor>"
+    },
+    "last_stable_summary": "<one compact current-truth summary>",
+    "cold_archive": "<path or ref>"
+  },
   "claims": [
     {
       "id": "<stable claim>",
@@ -136,6 +168,7 @@ Before dispatch, resume, write, long validation, commit, review, merge, cleanup,
 - WIP budget has capacity;
 - required upstream gates are exact-revision evidence;
 - no source change invalidated validation or review;
+- cycle-budget counters do not require a design/root-cause reassessment;
 - requested cleanup does not delete the only durable evidence.
 
 Do not infer commit authority from an evidence-preservation requirement. Reuse existing commits/refs where possible. For dirty WIP, use a labelled checkpoint commit only when authorized; otherwise preserve a patch together with every staged/unstaged/untracked file it omits, or a complete archive, then record hashes and verify restoration. Do not treat a Git bundle as dirty-file evidence. If no authorized durable form exists, leave the worktree quarantined and report cleanup blocked.
@@ -158,10 +191,16 @@ Exit `0` means reconciliation completed with no issues. Exit `2` means the JSON 
 
 - Treat interrupted, cancelled, timed-out, or incomplete validation as not passed.
 - Bind passed validation and review to exact candidate revisions.
+- Record `pre-audit-ready` only when the contract and candidate direction are stable, focused checks pass, and known gaps are explicit. Use this early gate only when the checkpoint's risk or local authority requires a pre-audit.
+- Record `final-review-ready` only when the exact final candidate is frozen and every required post-repair validation/manual evidence item is complete.
 - Append review records in observation order. For a terminal candidate, the last review entry is authoritative and must itself be `review passed`; an earlier pass never overrides a later failure or incomplete review.
 - Accept only literal `review passed` or `review failed` as a formal verdict.
 - Keep advisory output without a verdict as `reviewing` or `incomplete`.
-- After two substantive review failures on the same patch direction, stop version churn and revisit the contract/root-cause design before another candidate.
+- Default `candidate_attempt_limit` and `review_failure_limit` are both `2` for one root-cause direction. A local authority may lower them or deliberately raise them with a recorded reason.
+- Count a candidate attempt when a frozen candidate is rejected by required validation, product-path evidence, or formal review. Count a review failure only for a substantive literal `review failed`; a timeout or infrastructure interruption remains incomplete and does not consume the review-failure counter.
+- Before repair, consolidate all available findings into one batch. A changed exact revision is a replacement candidate, not permission to send parallel equal-scope reviewers or repeat the same full evidence load.
+- When either limit is reached, mark the checkpoint `blocked` with `root-cause-reassessment-required`. Stop packaging, broad matrices, and new formal review. Write a narrowed causal hypothesis, rejected assumptions, smallest acceptance matrix, and changed direction; then explicitly reset counters before implementation resumes.
+- Track delivery efficiency with compact counts: merged checkpoints, product-path-closed checkpoints, candidate attempts, formal review rounds, full package/build rounds, and active-registry size. Token counts may be recorded when the host exposes them, but never invent them.
 
 ## Progress checkpoint
 

@@ -1,7 +1,7 @@
 interface:
   display_name: "Series Task Workflow"
-  short_description: "Coordinate governed series with reliable pause and closeout"
-  default_prompt: "Use $series-task-workflow to coordinate this series with bounded WIP, explicit review gates, and reliable pause/closeout."
+  short_description: "Coordinate series with compact truth and bounded review cycles"
+  default_prompt: "Use $series-task-workflow with a compact current-truth registry, incremental reads from verified fingerprints/cursors, bounded WIP, one stable candidate per root-cause direction, batched review findings, and explicit cost circuit breakers."
 
 policy:
   allow_implicit_invocation: true

@@ -1,4 +1,4 @@
 interface:
   display_name: "野蜂"
-  short_description: "治理 Git 控制面，并编排 Codex/Claude 多后端协作"
-  default_prompt: "使用 $yefeng / 野蜂，先选择 embedded 或 external-git 控制面与启动档位，再按机器容量和 backend 边界分配角色；Level 3 control-spool 使用每 scope 单写者 broker 进行运行时通信，总控仍是 tracked 治理唯一写者和调度者；默认最小 MCP，Level 3 workspace-write 在可执行边界验证前保持禁用。"
+  short_description: "以紧凑控制真相编排 Codex/Claude 多代理协作"
+  default_prompt: "使用 $yefeng / 野蜂，以本地已验证状态为真相：先选择控制面与启动档位，再用指纹和游标增量读取、按容量分配角色，并执行候选/审查成本熔断；总控始终是 tracked 治理唯一写者和顶层调度者。"
