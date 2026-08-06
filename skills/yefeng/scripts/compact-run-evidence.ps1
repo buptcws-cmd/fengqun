@@ -169,6 +169,15 @@ function Test-HasStructuredBinding([object] $Run) {
   return $true
 }
 
+$singleRunReferenceFields = [System.Collections.Generic.HashSet[string]]::new(
+  [string[]] @('run_id', 'current_run_id', 'parent_run_id'),
+  [System.StringComparer]::Ordinal
+)
+$multipleRunReferenceFields = [System.Collections.Generic.HashSet[string]]::new(
+  [string[]] @('run_ids', 'referenced_run_ids'),
+  [System.StringComparer]::Ordinal
+)
+
 function Add-RunReferences([object] $Value, [System.Collections.Generic.HashSet[string]] $Set) {
   if ($null -eq $Value) { return }
   if ($Value -is [string] -or $Value.GetType().IsPrimitive) { return }
@@ -177,9 +186,9 @@ function Add-RunReferences([object] $Value, [System.Collections.Generic.HashSet[
     return
   }
   foreach ($property in @($Value.PSObject.Properties)) {
-    if ($property.Name -eq 'run_id' -and $property.Value -is [string] -and -not [string]::IsNullOrWhiteSpace([string] $property.Value)) {
+    if ($singleRunReferenceFields.Contains([string] $property.Name) -and $property.Value -is [string] -and -not [string]::IsNullOrWhiteSpace([string] $property.Value)) {
       $null = $Set.Add([string] $property.Value)
-    } elseif ($property.Name -eq 'run_ids' -and $property.Value -is [System.Collections.IEnumerable]) {
+    } elseif ($multipleRunReferenceFields.Contains([string] $property.Name) -and $property.Value -is [System.Collections.IEnumerable]) {
       foreach ($runId in @($property.Value)) {
         if ($runId -is [string] -and -not [string]::IsNullOrWhiteSpace([string] $runId)) { $null = $Set.Add([string] $runId) }
       }
@@ -261,6 +270,7 @@ function New-FilePrecondition(
     run_id = [string] $Run.run_id
     role_id = [string] $Run.role_id
     scope_id = [string] $Run.scope_id
+    product_repo_id = [string] $Run.product_repo_id
     run_epoch = [int64] $Run.run_epoch
     retention_group_id = [string] $Run.retention_group_id
     run_root = [string] $Run.run_root
@@ -585,10 +595,12 @@ foreach ($run in @($runsState.runs)) {
   }
   $rawRoleId = $run.role_id
   $roleId = [string] $rawRoleId
+  $rawProductRepoId = $run.product_repo_id
   $groupId = [string] $run.retention_group_id
   if (
     -not (Test-PathFreeId $rawRunId) -or
     -not (Test-PathFreeId $rawRoleId) -or
+    -not (Test-PathFreeId $rawProductRepoId) -or
     -not (Test-PathFreeId $run.retention_group_id) -or
     [int] $runIdCounts[$runId] -ne 1
   ) {
@@ -718,13 +730,27 @@ $orderedCandidates = @($baseCandidates | Sort-Object `
   @{ Expression = { [int64] $_.size }; Descending = $true }, `
   @{ Expression = { [string] $_.relative_path } })
 
+$planProductRepoId = if ($applyContext) {
+  [string] $applyContext.plan_receipt.plan.product_repo_id
+} elseif ($orderedCandidates.Count -gt 0) {
+  [string] $orderedCandidates[0].product_repo_id
+} else {
+  ''
+}
+if (-not [string]::IsNullOrWhiteSpace($planProductRepoId) -and -not (Test-PathFreeId $planProductRepoId)) {
+  throw "Plan product repository identity is invalid: $planProductRepoId"
+}
+$productCandidates = @(if (-not [string]::IsNullOrWhiteSpace($planProductRepoId)) {
+  $orderedCandidates | Where-Object { [string] $_.product_repo_id -ceq $planProductRepoId }
+})
+
 if ($applyContext) {
   $candidates = @($applyContext.planned_candidates)
-  if ($candidates.Count -gt [int] $policy.max_candidates_per_plan -or $candidates.Count -gt $orderedCandidates.Count) {
+  if ($candidates.Count -gt [int] $policy.max_candidates_per_plan -or $candidates.Count -gt $productCandidates.Count) {
     throw 'Saved plan candidates are not a safe prefix of the current deterministic eligible set.'
   }
   for ($index = 0; $index -lt $candidates.Count; $index++) {
-    if ((ConvertTo-CompactJson $candidates[$index]) -cne (ConvertTo-CompactJson $orderedCandidates[$index])) {
+    if ((ConvertTo-CompactJson $candidates[$index]) -cne (ConvertTo-CompactJson $productCandidates[$index])) {
       throw "Saved plan candidate is not the exact current deterministic eligible prefix at index $index."
     }
   }
@@ -739,7 +765,9 @@ if ($applyContext) {
     $candidateRoleId = [string] $candidate.role_id
     if (
       -not (Test-PathFreeId $candidate.run_id) -or
-      -not (Test-PathFreeId $candidate.role_id)
+      -not (Test-PathFreeId $candidate.role_id) -or
+      -not (Test-PathFreeId $candidate.product_repo_id) -or
+      [string] $candidate.product_repo_id -cne $planProductRepoId
     ) { throw "Plan candidate has an invalid role/run binding: $candidateRoleId/$candidateRunId" }
     $runKey = "$candidateRoleId/$candidateRunId"
     if (-not $auditedRunRoots.ContainsKey($runKey)) {
@@ -797,9 +825,9 @@ if ($applyContext) {
   return
 }
 
-$candidateLimit = [Math]::Min([int] $policy.max_candidates_per_plan, $orderedCandidates.Count)
+$candidateLimit = [Math]::Min([int] $policy.max_candidates_per_plan, $productCandidates.Count)
 $selected = [System.Collections.Generic.List[object]]::new()
-for ($index = 0; $index -lt $candidateLimit; $index++) { $selected.Add($orderedCandidates[$index]) }
+for ($index = 0; $index -lt $candidateLimit; $index++) { $selected.Add($productCandidates[$index]) }
 $protectedCounts = [ordered]@{}
 foreach ($entry in $protectedReasons.GetEnumerator()) {
   foreach ($reason in $entry.Value) {
@@ -815,8 +843,6 @@ foreach ($candidate in $selected) { $candidateBytes += [int64] $candidate.size }
 $applyTokenValue = [Guid]::NewGuid().ToString('N')
 $referenceIds = @($referenced | Sort-Object)
 $referenceSetSha256 = Get-Sha256Text (ConvertTo-CompactJson $referenceIds)
-$productRepoId = ''
-if (@($runsState.runs).Count -gt 0) { $productRepoId = [string] @($runsState.runs)[0].product_repo_id }
 $candidateSummary = [ordered]@{
   count = $selected.Count
   bytes = $candidateBytes
@@ -828,7 +854,7 @@ $plan = [ordered]@{
   scope_id = $ScopeId
   run_epoch = [int64] $runsState.run_epoch
   control_repo_id = [string] $runsState.control_repo_id
-  product_repo_id = $productRepoId
+  product_repo_id = $planProductRepoId
   base_control_head = $currentControlHead
   generated_at = $dryRunNow.ToString('o')
   expires_at = $dryRunNow.AddMinutes([double] $policy.apply_window_minutes).ToString('o')

@@ -126,9 +126,9 @@ function Assert-RetentionManifestCarrierMatches(
 # Adding a sixth slot or moving a trusted hash outside the block must fail tests.
 # RETENTION_TRUST_MANIFEST_START
 $retentionManifest = [ordered]@{
-  'compact-run-evidence.ps1' = 'ebf15689e53e9d482c2f0b38c9f02e5edd47469633694afb2e5c438dc080e41d'
+  'compact-run-evidence.ps1' = 'b3fe0a438bed444c2ba4bf38ed1459c86ec1efaf3de2fc7f2f2105289954b01b'
   'run-retention-policy.json' = '295df97cd07341663fe1716f310c372fccaaed7a553c560c2e364c91d93dcb4b'
-  'test-run-evidence-retention.ps1' = '43d28c6fdded85579518b8035bbfdd65d48faf1ff4b1a789b88d47c67a570b0b'
+  'test-run-evidence-retention.ps1' = '05878f93394555a85baca1618d4ec652e2222bbd9fe05fe6bee31c0b3e2ee91f'
   'install-governed-runner.ps1' = '6893bee6c2703671551880ac404b9ff36cbe66146e7346680b90cdfd7c6e8cd0'
   'validate-run-evidence-retention.ps1' = 'a536cc130ff796a2b96e285cddf4763dd7245202519827afe2459d0df6440eef'
 }

@@ -348,7 +348,7 @@ Remote creation, pushing, cloud backup, or publication remains an external write
 - [ ] Runtime logs, local roots, outboxes, broker state, quarantine payloads, and assignments are ignored.
 - [ ] New run rows carry complete structured retention bindings; legacy rows remain readable and retention-protected.
 - [ ] Evidence compaction defaults to dry-run, protects every active/review/recovery/reference gate, deletes exact allowed leaves only, and produces a receipt no larger than 64 KiB.
-- [ ] Retention helpers are installed from the exact three-file hash manifest; partial or tampered installations fail validation.
+- [ ] Retention helpers are installed from the exact five-file hash manifest; partial or tampered installations fail validation.
 - [ ] Tracked plans, state, events, decisions, and compact handoffs are committed.
 - [ ] Pause/resume follows the explicit lifecycle and increments the epoch.
 - [ ] Archive manifests and disaster-recovery limits are recorded.

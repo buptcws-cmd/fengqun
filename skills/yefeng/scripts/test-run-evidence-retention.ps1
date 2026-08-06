@@ -91,7 +91,8 @@ function New-Run(
   [string]$ReviewGate,
   [string]$Disposition,
   [DateTimeOffset]$EndedAt,
-  [bool]$Structured = $true
+  [bool]$Structured = $true,
+  [string]$ProductRepoId = 'product'
 ) {
   $run = [ordered]@{
     run_id = $RunId
@@ -100,7 +101,7 @@ function New-Run(
     scope_id = 'scope'
     run_epoch = 1
     control_repo_id = 'control'
-    product_repo_id = 'product'
+    product_repo_id = $ProductRepoId
     product_baseline_commit = ('a' * 40)
     product_branch = 'main'
     product_worktree = 'D:/fixture'
@@ -186,6 +187,7 @@ function New-ForgedCandidate([string]$Root, [object]$Run) {
     run_id = [string]$Run.run_id
     role_id = [string]$Run.role_id
     scope_id = [string]$Run.scope_id
+    product_repo_id = [string]$Run.product_repo_id
     run_epoch = [int64]$Run.run_epoch
     retention_group_id = [string]$Run.retention_group_id
     run_root = [string]$Run.run_root
@@ -333,6 +335,46 @@ try {
     Assert-ApplyRejected $forgedRoot $policyPath $forgedPlanPath $forgedDry.receipt 'deterministic eligible|safe prefix' "$($case.name) forged semantic authorization must reject"
     Assert-True (Test-Path -LiteralPath (Join-Path $forgedRoot "$($case.run.run_root)\stdout.jsonl")) "$($case.name) rejection must occur before deletion"
   }
+
+  # Every governed state reference shape must protect a run before planning,
+  # not merely invalidate Apply later through a state-hash mismatch.
+  $stateReferenceCases = @(
+    [pscustomobject]@{ name = 'control-current-run'; file = 'control.json'; property = 'current_run_id' },
+    [pscustomobject]@{ name = 'transport-referenced-runs'; file = 'transport.json'; property = 'referenced_run_ids' }
+  )
+  foreach ($case in $stateReferenceCases) {
+    $referenceRun = New-Run "$($case.name)-candidate" 'DONE' "$($case.name)-group" 'NOT_REQUIRED' 'DISCARDABLE' $old $true
+    $referenceFinal = New-Run "$($case.name)-final" 'DONE' "$($case.name)-group" 'PASSED' 'ACCEPTED' $old.AddDays(1) $true
+    $referenceRoot = New-ControlFixture $case.name @($referenceRun, $referenceFinal)
+    $statePath = Join-Path $referenceRoot ".yefeng\series\scope\state\$($case.file)"
+    $state = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($case.property -eq 'referenced_run_ids') { $state.($case.property) = @($referenceRun.run_id) }
+    else { $state.($case.property) = [string]$referenceRun.run_id }
+    Write-JsonFile $statePath $state
+    $null = Invoke-Git $referenceRoot @('add', '--all')
+    $null = Invoke-Git $referenceRoot @('commit', '-m', "fixture reference $($case.name)")
+    $referenceDry = Invoke-DryRun $referenceRoot $policyPath
+    Assert-True (
+      @($referenceDry.receipt.plan.candidates | Where-Object { $_.run_id -eq $referenceRun.run_id }).Count -eq 0
+    ) "$($case.name) must protect its run before planning"
+    Assert-True (
+      @($referenceDry.receipt.plan.summary.protected_examples | Where-Object { $_.run_id -eq $referenceRun.run_id -and $_.reasons -contains 'referenced' }).Count -eq 1
+    ) "$($case.name) protection must be receipted"
+  }
+
+  # A single PREPARED plan may cover only one exact product repository.
+  $multiProductRuns = @(
+    (New-Run 'product-a-candidate' 'DONE' 'product-a-delete' 'NOT_REQUIRED' 'DISCARDABLE' $old $true 'product-a'),
+    (New-Run 'product-a-final' 'DONE' 'product-a-delete' 'PASSED' 'ACCEPTED' $old.AddDays(1) $true 'product-a'),
+    (New-Run 'product-b-candidate' 'DONE' 'product-b-delete' 'NOT_REQUIRED' 'DISCARDABLE' $old $true 'product-b'),
+    (New-Run 'product-b-final' 'DONE' 'product-b-delete' 'PASSED' 'ACCEPTED' $old.AddDays(1) $true 'product-b')
+  )
+  $multiProductRoot = New-ControlFixture 'multi-product' $multiProductRuns
+  $multiProductDry = Invoke-DryRun $multiProductRoot $policyPath
+  $plannedProductIds = @($multiProductDry.receipt.plan.candidates | ForEach-Object { $_.product_repo_id } | Sort-Object -Unique)
+  Assert-True ($plannedProductIds.Count -eq 1) 'one retention plan must bind candidates from exactly one product repository'
+  Assert-True ([string]$multiProductDry.receipt.plan.product_repo_id -ceq [string]$plannedProductIds[0]) 'plan product identity must equal every candidate product identity'
+  Assert-True ([int]$multiProductDry.receipt.plan.summary.deferred_candidate_count -ge 1) 'other-product candidates must remain deferred for a later plan'
 
   # RED regression fixtures: terminal retention age must never fall back to
   # started_at when ended_at is blank, invalid, or absent. The pre-fix planner

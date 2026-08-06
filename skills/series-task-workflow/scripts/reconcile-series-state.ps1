@@ -177,7 +177,7 @@ catch {
     Complete-Reconciliation -ExitCode 2
 }
 
-$requiredStateFields = @('run_epoch', 'status', 'main_revision', 'claims', 'candidates')
+$requiredStateFields = @('run_epoch', 'status', 'main_revision', 'cycle_budget', 'claims', 'candidates')
 foreach ($field in $requiredStateFields) {
     if (-not (Test-Property -InputObject $state -Name $field)) {
         Add-Issue -Code 'state_schema_invalid' -Subject 'state' -Message "State field '$field' is required."
@@ -201,6 +201,62 @@ if (Test-Property -InputObject $state -Name 'run_epoch') {
 if (Test-Property -InputObject $state -Name 'main_revision') {
     if ([string]::IsNullOrWhiteSpace([string]$state.main_revision)) {
         Add-Issue -Code 'state_schema_invalid' -Subject 'state' -Message 'main_revision is required.'
+    }
+}
+
+$cycleBudgetValues = [ordered]@{
+    candidate_attempt_limit = 0
+    review_failure_limit = 0
+    candidate_attempts = 0
+    review_failures = 0
+    reset_count = 0
+}
+if (Test-Property -InputObject $state -Name 'cycle_budget') {
+    $cycleBudget = $state.cycle_budget
+    foreach ($field in @('candidate_attempt_limit', 'review_failure_limit', 'candidate_attempts', 'review_failures', 'reset_count')) {
+        if (-not (Test-Property -InputObject $cycleBudget -Name $field)) {
+            Add-Issue -Code 'state_schema_invalid' -Subject 'cycle_budget' -Message "Cycle budget field '$field' is required."
+            continue
+        }
+
+        $parsedValue = 0
+        $valueParsed = [int]::TryParse([string]$cycleBudget.$field, [ref]$parsedValue)
+        $minimumValue = if ($field -in @('candidate_attempt_limit', 'review_failure_limit')) { 1 } else { 0 }
+        if (-not $valueParsed -or $parsedValue -lt $minimumValue) {
+            Add-Issue -Code 'state_schema_invalid' -Subject 'cycle_budget' -Message "Cycle budget field '$field' must be an integer greater than or equal to $minimumValue." -Actual $cycleBudget.$field
+        }
+        else {
+            $cycleBudgetValues[$field] = $parsedValue
+        }
+    }
+
+    $hasLastReset = Test-Property -InputObject $cycleBudget -Name 'last_reset'
+    if (-not $hasLastReset) {
+        Add-Issue -Code 'state_schema_invalid' -Subject 'cycle_budget' -Message "Cycle budget field 'last_reset' is required."
+    }
+    elseif ($cycleBudgetValues.reset_count -eq 0 -and $null -ne $cycleBudget.last_reset) {
+        Add-Issue -Code 'state_schema_invalid' -Subject 'cycle_budget' -Message 'last_reset must be null when reset_count is zero.' -Expected $null -Actual $cycleBudget.last_reset
+    }
+    elseif ($cycleBudgetValues.reset_count -gt 0) {
+        if ($null -eq $cycleBudget.last_reset) {
+            Add-Issue -Code 'state_schema_invalid' -Subject 'cycle_budget' -Message 'A positive reset_count requires last_reset evidence.'
+        }
+        else {
+            foreach ($field in @('at', 'reason', 'changed_direction', 'acceptance_matrix', 'authorized_by')) {
+                if (-not (Test-Property -InputObject $cycleBudget.last_reset -Name $field) -or [string]::IsNullOrWhiteSpace([string]$cycleBudget.last_reset.$field)) {
+                    Add-Issue -Code 'state_schema_invalid' -Subject 'cycle_budget' -Message "last_reset field '$field' is required after a cycle reset."
+                }
+            }
+
+            if (Test-Property -InputObject $cycleBudget.last_reset -Name 'at') {
+                $resetAtText = ([string]$cycleBudget.last_reset.at).Trim()
+                $resetAt = [DateTimeOffset]::MinValue
+                $hasExplicitZone = $resetAtText.EndsWith('Z', [StringComparison]::OrdinalIgnoreCase) -or $resetAtText -match '[+-]\d{2}:\d{2}$'
+                if (-not $hasExplicitZone -or -not [DateTimeOffset]::TryParse($resetAtText, [ref]$resetAt)) {
+                    Add-Issue -Code 'state_schema_invalid' -Subject 'cycle_budget' -Message 'last_reset.at must be an RFC3339 timestamp with a timezone.' -Actual $cycleBudget.last_reset.at
+                }
+            }
+        }
     }
 }
 
@@ -437,6 +493,17 @@ if ($pendingReviewCount -gt $pendingReviewLimit) {
 
 $activeClaimStatuses = @('claimed', 'running', 'reviewing', 'blocked')
 $activeClaims = @($claims | Where-Object { $_.status -in $activeClaimStatuses })
+$cycleBudgetExhausted =
+    $cycleBudgetValues.candidate_attempts -ge $cycleBudgetValues.candidate_attempt_limit -or
+    $cycleBudgetValues.review_failures -ge $cycleBudgetValues.review_failure_limit
+if ($cycleBudgetExhausted) {
+    foreach ($candidate in @($candidates | Where-Object { $_.status -in $activeCandidateStatuses -and $_.status -ne 'blocked' })) {
+        Add-Issue -Code 'cycle_budget_exhausted' -Subject "candidate:$($candidate.id)" -Message 'Cycle budget is exhausted; block active work and record root-cause reassessment evidence before resetting counters.' -Expected 'blocked' -Actual $candidate.status
+    }
+    foreach ($claim in @($claims | Where-Object { $_.status -in $activeClaimStatuses -and $_.status -ne 'blocked' })) {
+        Add-Issue -Code 'cycle_budget_exhausted' -Subject "claim:$($claim.id)" -Message 'Cycle budget is exhausted; block active work and record root-cause reassessment evidence before resetting counters.' -Expected 'blocked' -Actual $claim.status
+    }
+}
 foreach ($claim in $activeClaims) {
     $claimId = if (Test-Property -InputObject $claim -Name 'id') { [string]$claim.id } else { 'unknown' }
     $subject = "claim:$claimId"

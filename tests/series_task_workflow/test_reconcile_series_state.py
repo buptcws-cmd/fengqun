@@ -150,6 +150,14 @@ class ReconcileSeriesStateIntegrationTests(unittest.TestCase):
                 "pending_reviews": 2,
                 "integration_batches": 1,
             },
+            "cycle_budget": {
+                "candidate_attempt_limit": 2,
+                "review_failure_limit": 2,
+                "candidate_attempts": 0,
+                "review_failures": 0,
+                "reset_count": 0,
+                "last_reset": None,
+            },
             "claims": claims or [],
             "candidates": candidates,
             "cleanup_state": cleanup_state,
@@ -616,6 +624,46 @@ class ReconcileSeriesStateIntegrationTests(unittest.TestCase):
             self._invoke(cwd=self.main_worktree, state_path=state_path),
             "wip",
             "active_repairs",
+        )
+
+    def test_exhausted_cycle_budget_blocks_active_candidate_until_reassessment(self) -> None:
+        source = self._create_candidate("alpha", "task/alpha")
+        running = self._candidate_state(source, status="running")
+        claim = self._active_claim("alpha")
+        exhausted = self._state([running], claims=[claim], active_repairs=1)
+        exhausted["cycle_budget"]["candidate_attempts"] = 2
+        exhausted_path = self._write_state(exhausted, "cycle-exhausted.json")
+        self._assert_issue(
+            self._invoke(cwd=self.main_worktree, state_path=exhausted_path),
+            "cycle",
+            "exhausted",
+        )
+
+        blocked = copy.deepcopy(exhausted)
+        blocked["candidates"][0]["status"] = "blocked"
+        blocked["claims"][0]["status"] = "blocked"
+        blocked_path = self._write_state(blocked, "cycle-blocked.json")
+        self._assert_clean(
+            self._invoke(cwd=self.main_worktree, state_path=blocked_path)
+        )
+
+        reset = copy.deepcopy(exhausted)
+        reset["cycle_budget"].update(
+            {
+                "candidate_attempts": 0,
+                "reset_count": 1,
+                "last_reset": {
+                    "at": self._iso_time(hours=0),
+                    "reason": "root-cause reassessment completed",
+                    "changed_direction": "replace the rejected producer path",
+                    "acceptance_matrix": "focused regression plus product path",
+                    "authorized_by": "series-coordinator",
+                },
+            }
+        )
+        reset_path = self._write_state(reset, "cycle-reset.json")
+        self._assert_clean(
+            self._invoke(cwd=self.main_worktree, state_path=reset_path)
         )
 
 

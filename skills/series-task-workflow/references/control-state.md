@@ -106,7 +106,9 @@ Keep only current in-scope candidates in `candidates`; move superseded or histor
     "candidate_attempt_limit": 2,
     "review_failure_limit": 2,
     "candidate_attempts": 0,
-    "review_failures": 0
+    "review_failures": 0,
+    "reset_count": 0,
+    "last_reset": null
   },
   "context_checkpoint": {
     "instruction_fingerprints": {
@@ -200,6 +202,7 @@ Exit `0` means reconciliation completed with no issues. Exit `2` means the JSON 
 - Count a candidate attempt when a frozen candidate is rejected by required validation, product-path evidence, or formal review. Count a review failure only for a substantive literal `review failed`; a timeout or infrastructure interruption remains incomplete and does not consume the review-failure counter.
 - Before repair, consolidate all available findings into one batch. A changed exact revision is a replacement candidate, not permission to send parallel equal-scope reviewers or repeat the same full evidence load.
 - When either limit is reached, mark the checkpoint `blocked` with `root-cause-reassessment-required`. Stop packaging, broad matrices, and new formal review. Write a narrowed causal hypothesis, rejected assumptions, smallest acceptance matrix, and changed direction; then explicitly reset counters before implementation resumes.
+- Record each explicit reset by incrementing `reset_count` and replacing `last_reset` with an object containing RFC3339 `at`, non-empty `reason`, `changed_direction`, `acceptance_matrix`, and `authorized_by`. With `reset_count: 0`, `last_reset` must be `null`. The reconciler rejects non-blocked active candidates or claims after either limit is reached, and rejects a reset without this evidence.
 - Track delivery efficiency with compact counts: merged checkpoints, product-path-closed checkpoints, candidate attempts, formal review rounds, full package/build rounds, and active-registry size. Token counts may be recorded when the host exposes them, but never invent them.
 
 ## Progress checkpoint

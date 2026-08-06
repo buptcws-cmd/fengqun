@@ -30,6 +30,21 @@ class YefengContextEfficiencyContractTests(unittest.TestCase):
         self.assertIn("candidate_attempt_limit", skill)
         self.assertIn("review_failure_limit", skill)
 
+    def test_canonical_run_template_includes_retention_bindings(self) -> None:
+        templates = (SKILL_ROOT / "references" / "templates.md").read_text(
+            encoding="utf-8"
+        )
+
+        for field in (
+            '"run_root"',
+            '"retention_group_id"',
+            '"parent_run_id"',
+            '"review_gate"',
+            '"control_disposition"',
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, templates)
+
 
 if __name__ == "__main__":
     unittest.main()

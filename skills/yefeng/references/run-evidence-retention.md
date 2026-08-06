@@ -2,6 +2,15 @@
 
 Read this reference before assessing, compacting, archiving, or deleting ignored run logs.
 
+## Contents
+
+- [Purpose](#purpose)
+- [Structured Binding](#structured-binding)
+- [Default Policy](#default-policy)
+- [Exact Deletion Surface](#exact-deletion-surface)
+- [Two-Commit Apply Protocol](#two-commit-apply-protocol)
+- [Failure And Recovery](#failure-and-recovery)
+
 ## Purpose
 
 Compact semantic duplicates after a completed batch without weakening active review, recovery, or audit evidence. This is evidence lifecycle management, not a generic disk cleanup command.
@@ -59,6 +68,8 @@ Always protect:
 - every path containing a symlink, junction, mount point, or other reparse point.
 
 The planner selects semantically eligible leaf logs at or above 1 MiB. When a scope or overall cap is exceeded, it may also select smaller eligible leaves. It batches and defers candidates to keep each plan/receipt within 64 KiB.
+
+Each plan binds exactly one `product_repo_id`. In a multi-product scope, candidates for other product repositories remain deferred for later plans; every candidate repeats the same product identity so PREPARED and Apply attribution cannot cross product boundaries.
 
 The bundled policy is a ceiling on deletion authority, not an authorization source. A custom policy may only be stricter: terminal/superseded ages, log threshold, caps, and retained failure/pass counts may increase; receipt size, Apply window, and batch size may decrease. The exact four allowed leaves cannot change. Hard-coded code invariants always protect known protected dispositions, pending/unknown review gates, nonterminal/unknown states, and invalid or blank identities/enums/bindings.
 
