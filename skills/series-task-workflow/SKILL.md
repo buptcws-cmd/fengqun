@@ -210,7 +210,11 @@ For file-changing tasks in a shared series, use a dedicated branch and worktree 
 
 ## Review Contract
 
-Do not dispatch formal review until the candidate revision is frozen, required validation is complete, actual diff matches declared write surfaces, and known gaps are explicit. A reviewer receives the task contract, exact base and candidate revisions/diff, validation evidence, and necessary reproduction material—not the author's desired verdict.
+Use `code-review-and-quality` as the authority for review multiplicity and reviewer charters. The series workflow records and schedules that decision; it must not add another review merely because coordination is active. Use one independent final review by default. Add an in-flight adversarial pre-audit or another formal reviewer only when local authority or material architecture, security, authorization, concurrency/state-machine, migration, irreversible, or cross-boundary risk justifies it.
+
+When `doubt-driven-development` and a required pre-audit would inspect the same artifact and contract, let one fresh-context adversarial pass satisfy both. When multiple reviewers are required, record the reason and distinct primary charter for each, freeze one shared subject, dispatch the reviewers in parallel, and reconcile their findings into one repair batch. If they would receive the same prompt and focus, remove the duplicate unless local authority literally requires it.
+
+Do not dispatch formal review until the candidate revision is frozen, required validation is complete, actual diff matches declared write surfaces, and known gaps are explicit. A reviewer receives one shared evidence bundle containing the task contract, exact base and candidate revisions/diff, validation evidence, and necessary reproduction material—not the author's desired verdict.
 
 Require the reviewer to return:
 
@@ -222,7 +226,7 @@ residual_risk: <text>
 unlock_effect: <what this verdict permits or blocks>
 ```
 
-A closed, timed-out, interrupted, advisory-only, or ambiguous review has no verdict and remains incomplete. Any candidate change invalidates the prior verdict. Use one independent full review by default; add another only when local authority or material architecture, security, authorization, state-machine, or cross-boundary risk justifies it.
+A closed, timed-out, interrupted, advisory-only, or ambiguous review has no verdict and remains incomplete. Any change to reviewed product code, contract, tests, or relevant evidence invalidates the prior formal verdict; review artifacts or registry-only metadata outside the reviewed surface do not. After a repair, re-freeze and rerun every verdict invalidated by local authority or the changed scope. Do not alternate small patches between reviewers when their findings can be consolidated first.
 
 ## Completion And Cleanup
 

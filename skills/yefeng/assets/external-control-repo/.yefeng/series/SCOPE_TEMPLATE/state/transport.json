@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "scope_id": "__SCOPE_ID__",
+  "run_epoch": 1,
+  "control_repo_id": "__CONTROL_REPO_ID__",
+  "imported_messages": [],
+  "quarantined_messages": [],
+  "updated_at": "__CREATED_AT__"
+}

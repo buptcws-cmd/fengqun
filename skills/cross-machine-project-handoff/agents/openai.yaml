@@ -1,0 +1,4 @@
+interface:
+  display_name: "跨电脑项目交接"
+  short_description: "审计、打包、恢复并验证跨电脑项目状态"
+  default_prompt: "请使用 $cross-machine-project-handoff 审计当前工作区，识别 Git、敏感状态、私有数据候选和机器级工具，并在得到授权后生成可验证的跨电脑交接包与新会话提示词。"

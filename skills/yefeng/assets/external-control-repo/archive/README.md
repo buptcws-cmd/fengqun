@@ -1,0 +1,3 @@
+# Archive
+
+Closed cycles move here with a manifest containing final product refs/commits, the closing control commit recorded after archive, event range/hash, terminal role and blocker state, remaining branches/worktrees, and evidence-retention policy. Record retained last-failure/final-pass run IDs, explicit retention pins, the dry-run base and plan digest, the unique committed PREPARED HEAD/event, Apply receipt digest/count/bytes when compaction occurred, and any legacy or reconciliation directories intentionally left untouched. Never copy full stdout/stderr into the archive. Unarchive creates a new epoch.

@@ -1,0 +1,44 @@
+{
+  "version": 2,
+  "scope_id": "__SCOPE_ID__",
+  "run_epoch": 1,
+  "control_repo_id": "__CONTROL_REPO_ID__",
+  "roles": [
+    {
+      "role_id": "INTEGRATOR",
+      "role_name": "Total-control integrator",
+      "scope_id": "__SCOPE_ID__",
+      "run_epoch": 1,
+      "control_repo_id": "__CONTROL_REPO_ID__",
+      "state": "PLANNED",
+      "assigned_by": null,
+      "assignment_id": null,
+      "session_id": null,
+      "process_id": null,
+      "run_id": null,
+      "product_repo_id": "__PRODUCT_REPO_ID__",
+      "product_baseline_commit": "__PRODUCT_BASELINE__",
+      "product_branch": "__PRODUCT_BRANCH__",
+      "product_worktree": null,
+      "transport_mode": "control-spool",
+      "current_checkpoint": "governance-bootstrap",
+      "outcome_lock_revision": "__OUTCOME_LOCK_REVISION__",
+      "delivery_classification": "SPEC_ONLY",
+      "user_visible_proof": "__USER_VISIBLE_PROOF__",
+      "immediate_product_consumer": "Outcome-lock confirmation before implementation.",
+      "owned_scope": [
+        "control governance only"
+      ],
+      "forbidden_scope": [
+        "unapproved product implementation"
+      ],
+      "blocked_by": "",
+      "resume_when": "",
+      "required_evidence": "",
+      "wake_target": "",
+      "last_seen": "",
+      "lease_expires_at": "",
+      "last_output": "Governance initialized; no role launched."
+    }
+  ]
+}
