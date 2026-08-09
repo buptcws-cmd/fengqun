@@ -8,8 +8,11 @@ Start every control turn by reading:
 2. `docs/status.md`
 3. `.yefeng/control-plane.json`
 4. `.yefeng/series/__SCOPE_ID__/state/control.json`
-5. `docs/modules/__SCOPE_ID__/registry.md`
-6. open directives, messages, and integration intents
+5. `docs/modules/__SCOPE_ID__/charter.md`
+6. `docs/modules/__SCOPE_ID__/registry.md`
+7. open directives, messages, and integration intents
+
+The control state and charter contain the Outcome Lock. `UNCONFIRMED` authorizes governance bootstrap only. Before Level 2/3 implementation, record the user-visible proof, first vertical slice, MVP/non-goals, reuse/adapt/new/defer disposition, public-contract families, operator ceiling, estimate baseline, drift thresholds, and approval provenance as `CONFIRMED`. Default approval drains safe work inside that lock; it does not change the lock.
 
 Tracked files hold stable plans, state, events, receipts, decisions, and compact handoffs. Local roots, run logs, assignments, locks, and role outboxes are ignored runtime transport.
 

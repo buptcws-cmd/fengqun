@@ -2,27 +2,33 @@
 
 Read this reference completely for total-control `check`, `poll`, `巡检`, `continue`, `resume`, heartbeat, integration, or closeout turns.
 
+Also read `outcome-and-scope-control.md` completely before the first implementation dispatch, after a material estimate change, or whenever a scope-drift breaker may have tripped.
+
 ## Executable Turns
 
-A total-control turn is executable by default, but the recorded startup level is an authorization gate and hard upper bound. Words such as `check`, `poll`, `巡检`, `continue`, `resume`, and heartbeat mean inspect state and perform every action allowed by both the current level and authorization policy. Treat a turn as read-only only when the user says `read-only`, `dry-run`, `no launch`, `do not start`, `do not resume`, or `do not merge`, or when startup level, policy, evidence, capacity, conflict, or missing authority blocks execution.
+A total-control turn is executable by default, but the recorded startup level, outcome lock, and authorization policy are independent hard bounds. Words such as `check`, `poll`, `巡检`, `continue`, `resume`, and heartbeat mean inspect state and perform every action allowed by all three. Default approval removes repeated operational questions inside those bounds; it never authorizes a different product outcome. Treat a turn as read-only only when the user says `read-only`, `dry-run`, `no launch`, `do not start`, `do not resume`, or `do not merge`, or when startup level, outcome/scope alignment, policy, evidence, capacity, conflict, or missing authority blocks execution.
 
 Treat the snapshot's next-safe-action queue as executable work, not suggestions. Run a drain loop:
 
-1. reconcile actual product Git, control Git, worktrees, processes, roles, claims, and current epoch;
-2. at authorized Level 3 `control-spool`, verify the exact broker instance, drain accepted runtime events after the tracked cursor, and promote them idempotently into tracked governance; otherwise import legacy/worktree-local role outboxes;
-3. route messages and decide whether blockers cleared;
-4. resume cleared roles;
-5. integrate review-ready product branches;
-6. launch every safe role that fits capacity only when the recorded startup level permits role execution;
-7. update and commit stable control facts;
-8. recompute state and repeat until quiescent.
+1. reconcile the exact outcome-lock revision, user-visible proof, non-goals, delivery classes, estimate baseline, and drift counters;
+2. reconcile actual product Git, control Git, worktrees, processes, roles, claims, and current epoch;
+3. at authorized Level 3 `control-spool`, verify the exact broker instance, drain accepted runtime events after the tracked cursor, and promote them idempotently into tracked governance; otherwise import legacy/worktree-local role outboxes;
+4. route messages and decide whether blockers cleared;
+5. resume cleared roles whose assignment remains inside the outcome lock;
+6. integrate product branches only when direction-first review and normal evidence gates pass;
+7. launch every safe in-lock role that fits capacity only when the recorded startup level permits role execution;
+8. update and commit stable control facts;
+9. recompute state and repeat until quiescent or a scope-drift breaker trips.
 
 If an action is authorized, unblocked, and within capacity, execute it now. If it cannot execute, record `blocked_by`, `resume_when`, `required_evidence`, and `wake_target`.
+
+Technically possible out-of-lock work is not an executable queue item. When a breaker trips, freeze new dispatch/integration for the affected scope, preserve safe evidence, and issue one batched product decision. Continue unrelated, clearly in-lock work when it remains safe.
 
 Quiescence means one of these is true:
 
 - no executable run completion, outbox, merge, resume, directive, dirty stable governance, or queue item remains;
 - remaining work needs authorization, evidence, dependency completion, conflict resolution, or a user decision;
+- remaining work is paused by a recorded scope-drift breaker pending one batched outcome-lock decision;
 - useful parallel capacity is full and remaining work depends on active roles;
 - a launched/resumed role leaves no independent safe action;
 - a practical turn budget is reached and the exact deferred actions and reasons are recorded.
@@ -55,6 +61,14 @@ For `external-git`, process control and product repositories separately:
 5. after a successful product merge, commit `BASELINE_UPDATED` with the exact product merge commit;
 6. if the control commit fails after product integration, mark reconciliation required and repair idempotently on the next turn rather than attempting to undo unrelated product history.
 
+## Progress And Estimate Reconciliation
+
+For every completed checkpoint, record one primary class from `PRODUCT_PATH_CLOSED`, `PRODUCT_PATH_ADVANCED`, `ENABLEMENT_ONLY`, `SPEC_ONLY`, or `TEST_ONLY`. Name the immediate product consumer for `ENABLEMENT_ONLY`; trip the drift breaker if the consumer is deferred or moved twice.
+
+Keep the last user-confirmed estimate baseline visible. If remaining work grows beyond the recorded tolerance, do not silently replace the baseline. Report the previous baseline, current estimate, scope delta, evidence that changed it, user-visible work completed, enablement-only work completed, and remaining product path, then request one decision only if the outcome lock must change.
+
+Do not add `P50`, `P80`, confidence bands, percentages complete, or estimate labels copied from another workstream unless the current outcome lock or project policy defines them. When the evidence cannot support an honest ETA, state the missing decision/evidence and the next re-estimation boundary instead of fabricating precision.
+
 ## Closeout
 
 At closeout, report:
@@ -63,6 +77,7 @@ At closeout, report:
 - product worktrees/branches created, integrated, and cleaned;
 - messages routed, directives changed, and blockers cleared;
 - exact product commits and control commits that changed state;
+- outcome-lock revision, delivery classification, user-visible proof reached, and any scope/estimate delta;
 - validation and reviewer evidence;
 - terminal subagent/process cleanup evidence;
 - control-repository cleanliness and each affected product-repository cleanliness separately;

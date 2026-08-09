@@ -213,6 +213,29 @@ class ExternalControlRepoIntegrationTests(unittest.TestCase):
         roles_state = self._read_json(roles_path)
         runs_state = self._read_json(runs_path)
         writer_id = control_state["writer_fence"]["writer_id"]
+        outcome_lock_revision = "test-outcome-lock-v1"
+        control_state["outcome_lock"].update(
+            {
+                "status": "CONFIRMED",
+                "revision": outcome_lock_revision,
+                "user_visible_proof": "The governed recovery flow completes and validates.",
+                "first_vertical_slice": "Recover one active scope without losing custody.",
+                "mvp_scope": "Writer takeover and committed control-plane validation.",
+                "non_goals": "No product capability expansion.",
+                "existing_capability_inventory": "Reuse the existing writer lifecycle helpers.",
+                "reuse_adapt_new_defer": "Reuse lifecycle; adapt the confirmed outcome fixture.",
+                "approved_public_contract_families": "Existing external-control contract only.",
+                "authorization_ceiling": "Test-only local repository mutation.",
+                "auto_execution_boundary": "Run the isolated recovery fixture.",
+                "ask_boundary": "No external side effects.",
+                "estimate_baseline": "One bounded integration test.",
+                "drift_thresholds": "Stop on any additional product scope.",
+                "approved_by": "yefeng-test",
+                "approved_at": datetime.now(timezone.utc).strftime(
+                    "%Y-%m-%dT%H:%M:%S.%f0+00:00"
+                ),
+            }
+        )
         control_state["startup_level"] = "LEVEL_3_FULL_PARALLEL_YEFENG"
 
         integrator = roles_state["roles"][0]
@@ -226,6 +249,10 @@ class ExternalControlRepoIntegrationTests(unittest.TestCase):
                 "run_id": "run-epoch-1-integrator",
                 "product_worktree": str(self.fixture_root / "worktree-integrator"),
                 "current_checkpoint": "implementation",
+                "outcome_lock_revision": outcome_lock_revision,
+                "delivery_classification": "TEST_ONLY",
+                "user_visible_proof": "The recovery fixture reaches committed validation.",
+                "immediate_product_consumer": "External-control recovery contract test.",
                 "lease_expires_at": (
                     datetime.now(timezone.utc) + timedelta(hours=1)
                 ).isoformat(),

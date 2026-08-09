@@ -105,11 +105,25 @@ Validate:
 - `status` in `completed|failed`;
 - integer `exit_code`;
 - `completed` iff exit code is zero, `failed` iff nonzero;
-- parseable `started_at` and `ended_at`, with end not before start.
+- parseable `started_at` and canonical `ended_at` written from `DateTimeOffset.ToString('o')`, with end not before start. Every governed terminal-run producer uses that exact round-trip representation; a merely parseable alternative is invalid and retention-protected.
 
 Poll, resume, active census, and cleanup all use the same terminal validator.
 
 Historical terminal runs may remain as immutable evidence and do not count in the current epoch. A historical non-terminal run blocks dispatch until reconciled.
+
+## Structured Retention Binding
+
+Every new run row should record these additive fields:
+
+- `run_root`: control-root-relative `.yefeng/runs/<scope_id>/<role_id>/<run_id>`;
+- `retention_group_id`: path-free logical retry/review group;
+- `parent_run_id`: exact parent run ID or `null`;
+- `review_gate`: `PENDING`, `PASSED`, `FAILED`, or `NOT_REQUIRED`;
+- `control_disposition`: `ACTIVE`, `UNREVIEWED`, `BLOCKING`, `RECOVERY`, `RECONCILIATION`, `SUPERSEDED`, `ACCEPTED`, `ARCHIVED`, or `DISCARDABLE`.
+
+These fields are additive. Readers must continue accepting old run rows, but retention treats a row missing any field as legacy-protected. Do not synthesize a binding from directory names.
+
+In `external-git` mode, after a terminal batch is reviewed and its control disposition is committed, read `run-evidence-retention.md` and run `compact-run-evidence.ps1` in `DryRun` mode from a clean exact control Git top level. The bundled compactor rejects embedded topology; embedded runs remain retained until a separately reviewed embedded retention path exists. Apply only a separately preserved dry-run receipt after one unique matching `RUN_EVIDENCE_RETENTION_PREPARED` event is committed as the direct child of the planned control HEAD. The event binds epoch, policy, token digest, candidate summary, reference set, and the committed runs/roles/control/transport hashes. Process cleanup and log compaction are different operations: cleanup stops verified process trees; compaction removes only eligible full-output leaf files.
 
 ## PID-Safe Cleanup
 

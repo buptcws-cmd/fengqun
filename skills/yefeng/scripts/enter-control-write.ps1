@@ -247,12 +247,12 @@ if (-not (Test-Path -LiteralPath $controlStatePath -PathType Leaf)) { throw "Mis
 if (-not (Test-Path -LiteralPath $localFencePath -PathType Leaf)) { throw "Missing local writer fence: $localFencePath" }
 if (-not (Test-Path -LiteralPath $controlHeadPath -PathType Leaf)) { throw "Missing repository control HEAD state: $controlHeadPath" }
 
-$controlState = Get-Content -LiteralPath $controlStatePath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+$controlState = ConvertFrom-ControlJson (Get-Content -LiteralPath $controlStatePath -Raw -Encoding UTF8)
 $originalLocalFenceJson = Get-Content -LiteralPath $localFencePath -Raw -Encoding UTF8
 $originalControlHeadJson = Get-Content -LiteralPath $controlHeadPath -Raw -Encoding UTF8
 $localFence = ConvertFrom-ControlJson $originalLocalFenceJson
 Assert-LocalFenceSchema $localFence
-$controlHeadState = $originalControlHeadJson | ConvertFrom-Json -ErrorAction Stop
+$controlHeadState = ConvertFrom-ControlJson $originalControlHeadJson
 $actualHead = Invoke-Git $controlRootPath @('rev-parse', 'HEAD')
 
 if ($controlState.scope_id -ne $ScopeId -or $localFence.scope_id -ne $ScopeId) { throw 'Writer fence scope mismatch.' }
@@ -321,7 +321,7 @@ try {
     Write-Utf8FileAtomically $localFencePath $originalLocalFenceJson
     Write-Utf8FileAtomically $controlHeadPath $originalControlHeadJson
     if (Test-Path -LiteralPath $lockPath) {
-      $createdLock = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+      $createdLock = ConvertFrom-ControlJson (Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8)
       if ($createdLock.lock_token -eq $lockToken) { Remove-Item -LiteralPath $lockPath -Force }
     }
   }

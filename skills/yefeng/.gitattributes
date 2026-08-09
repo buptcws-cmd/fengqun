@@ -1,0 +1,5 @@
+/scripts/compact-run-evidence.ps1 text eol=lf
+/scripts/run-retention-policy.json text eol=lf
+/scripts/test-run-evidence-retention.ps1 text eol=lf
+/scripts/install-governed-runner.ps1 text eol=lf
+/scripts/validate-run-evidence-retention.ps1 text eol=lf

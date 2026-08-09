@@ -469,6 +469,33 @@ class ValidatorPrepareContractTests(unittest.TestCase):
                 result["issues"],
             )
 
+    def test_committed_validation_rejects_ignored_untracked_retention_artifact(
+        self,
+    ) -> None:
+        control, product, scope_id = self._bootstrap_committed_control(
+            "retention-tracking"
+        )
+        relative = "scripts/yefeng/compact-run-evidence.ps1"
+        destination = control / Path(relative)
+        shutil.copyfile(SOURCE_SCRIPTS / destination.name, destination)
+        info_exclude = control / ".git" / "info" / "exclude"
+        with info_exclude.open("a", encoding="utf-8") as stream:
+            stream.write(f"\n/{relative}\n")
+        self.assertEqual(self._git(control, "status", "--short"), "")
+
+        completed, result = self._validate(control, product, scope_id, committed=True)
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertFalse(result["valid"])
+        self.assertTrue(
+            any(relative in issue and "not tracked" in issue for issue in result["issues"]),
+            result["issues"],
+        )
+        self.assertTrue(
+            any(relative in issue and "ignored" in issue for issue in result["issues"]),
+            result["issues"],
+        )
+
     def test_committed_validation_rejects_ignored_untracked_scope_file(self) -> None:
         control, product, _, scope_id = self._init_control("committed")
         self._commit(control, "bootstrap control")

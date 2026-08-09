@@ -88,6 +88,7 @@ Path rules:
 - `codex exec` and resume run from the assigned product worktree;
 - every Git command uses `git -C <explicit-root>`;
 - cleanup targets must resolve under a recorded run root or worktree root.
+- retention targets require a complete structured run binding and resolve only to an allowed leaf under the exact recorded `run_root`.
 
 ## Recommended Repository Shape
 
@@ -202,6 +203,8 @@ product_worktree (runtime manifest)
 transport_mode
 ```
 
+New run records additionally carry `run_root`, `retention_group_id`, `parent_run_id`, `review_gate`, and `control_disposition`. They are optional for read compatibility with existing repositories, but a run missing any one of them is ineligible for evidence compaction. Validate complete bindings when present; never infer missing values from a physical runtime directory.
+
 Each scope has one total-control owner. Only the global integrator writes `docs/shared/**` and any global index. Module total-control threads request shared changes through `CONTRACT_CHANGE`; they do not edit another scope or the shared integration queue directly unless assigned serialized write authority.
 
 Choose scope granularity by authority and recovery boundary, not by folder count. Keep tightly coupled modules that share one objective, contract graph, approval gate, budget, and total-control writer in one umbrella scope. Split a new scope only when it can own an independent objective, queue, epoch, budget, and writer lease without direct writes into another scope. Unrelated long-lived series must not accumulate inside one permanent umbrella scope; they coordinate through the global integrator and shared contract-change queue.
@@ -286,8 +289,22 @@ Prefer the bundled `scripts/init-external-control-repo.ps1`, which transactional
 & <skill-root>\scripts\init-external-control-repo.ps1 `
   -ControlRoot <control-root> -ProductRoot <product-root> `
   -ProjectName <name> -ProjectId <id> -ScopeId <scope-id> `
+  -OutcomeLockStatus CONFIRMED `
+  -OutcomeLockRevision <revision> `
+  -UserObjective <objective> `
+  -UserVisibleProof <real-product-proof> `
+  -FirstVerticalSlice <first-slice> `
+  -MvpScope <mvp> -NonGoals <non-goals> `
+  -ExistingCapabilityInventory <existing-capabilities> `
+  -ReuseAdaptNewDefer <reuse-adapt-new-defer> `
+  -ApprovedPublicContractFamilies <contract-families> `
+  -AuthorizationCeiling <operator-ceiling> `
+  -EstimateBaseline <baseline> -DriftThresholds <thresholds> `
+  -OutcomeApprovedBy <user-or-authority> -OutcomeApprovedAt <canonical-DateTimeOffset-o> `
   -BindProductGitConfig
 ```
+
+The outcome parameters are optional only so Level 1 can bootstrap before product decisions finish; omitted values render as `unconfirmed` and block implementation upgrade until replaced by a user-confirmed outcome lock. Default approval still covers only execution inside that lock.
 
 At `LEVEL_1_GOVERNANCE_BOOTSTRAP`:
 
@@ -296,7 +313,7 @@ At `LEVEL_1_GOVERNANCE_BOOTSTRAP`:
 3. create the tracked topology, authorization, total-control, status, module, shared, archive, and machine-state skeletons;
 4. create ignored local root mapping and runtime transport directories, including the per-scope broker root;
 5. read product Git status and exact baseline without modifying product files;
-6. create scopes with roles in `PLANNED`, `run_epoch=1`, and no active claims;
+6. create scopes with roles in `PLANNED`, `run_epoch=1`, no active claims, and a confirmed outcome lock or explicit `unconfirmed` implementation gate;
 7. validate JSON, path containment, ignore rules, Git tracking, product/control identity, and startup level;
 8. commit the control bootstrap atomically;
 9. optionally add a reviewed stable pointer to the product repository through its normal Git workflow;
@@ -308,6 +325,7 @@ Remote creation, pushing, cloud backup, or publication remains an external write
 
 - Never store secrets, API keys, provider credentials, or unredacted sensitive command lines in the control repository.
 - Treat ignored run logs as local evidence; promote only compact, redacted conclusions.
+- Compact ignored run logs only with `scripts/yefeng/compact-run-evidence.ps1` and the governed protocol in `run-evidence-retention.md`. Default to dry-run. Apply requires a clean control repository whose current single-parent HEAD uniquely commits the matching `RUN_EVIDENCE_RETENTION_PREPARED` event directly over the plan baseline; the event binds policy/token/candidates/references and runs/roles/control/transport state hashes. An `APPLIED` commit promotes the bounded receipt afterward. If the actual run directory cannot be matched to complete structured state, leave it untouched.
 - Bind validations and reviews to exact product commits.
 - Model scope lifecycle explicitly as `ACTIVE`, `PAUSING`, `PAUSED`, `RECOVERING`, or `ARCHIVED`. During `PAUSING`, stop new dispatch, collect role state, invalidate leases, and increment `run_epoch`; only then publish `PAUSED`. Resume through `RECOVERING`, reconciling repositories, processes, worktrees, open operations, and transport receipts before returning to `ACTIVE`.
 - Increment `run_epoch` on pause, handoff, cancellation, or takeover, and reject messages from earlier epochs.
@@ -342,6 +360,9 @@ Remote creation, pushing, cloud backup, or publication remains an external write
 - [ ] Control and product Git statuses are reported separately.
 - [ ] Product repository remains unchanged during Level 1 unless a pointer change is separately authorized.
 - [ ] Runtime logs, local roots, outboxes, broker state, quarantine payloads, and assignments are ignored.
+- [ ] New run rows carry complete structured retention bindings; legacy rows remain readable and retention-protected.
+- [ ] Evidence compaction defaults to dry-run, protects every active/review/recovery/reference gate, deletes exact allowed leaves only, and produces a receipt no larger than 64 KiB.
+- [ ] Retention helpers are installed from the exact five-file hash manifest; partial or tampered installations fail validation.
 - [ ] Tracked plans, state, events, decisions, and compact handoffs are committed.
 - [ ] Pause/resume follows the explicit lifecycle and increments the epoch.
 - [ ] Archive manifests and disaster-recovery limits are recorded.

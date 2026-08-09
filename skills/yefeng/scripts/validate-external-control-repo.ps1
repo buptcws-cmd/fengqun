@@ -15,13 +15,15 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8NoBom
 $OutputEncoding = $utf8NoBom
 $issues = [System.Collections.Generic.List[string]]::new()
+$warnings = [System.Collections.Generic.List[string]]::new()
 $knownEventTypes = @(
   'CONTROL_BOOTSTRAPPED', 'ROLE_ASSIGNED', 'ROLE_STARTED', 'ROLE_OUTPUT', 'ROLE_BLOCKED',
   'ROLE_READY_TO_RESUME', 'ROLE_DONE', 'QUESTION', 'ANSWER', 'BLOCKER', 'CONTRACT_CHANGE',
   'REVIEW_REQUEST', 'REVIEW_RESULT', 'HANDOFF', 'BASELINE_UPDATED', 'INTEGRATION_INTENT',
   'PRODUCT_COMMITTED', 'PRODUCT_VERIFIED', 'CONTROL_COMMITTED', 'RECONCILIATION_REQUIRED',
   'IMPORT_RECEIPT', 'RECOVERY_STARTED', 'RECOVERY_COMPLETED', 'RESUME_NOTICE',
-  'USER_DECISION_REQUIRED', 'DIRECTIVE'
+  'USER_DECISION_REQUIRED', 'DIRECTIVE', 'RUN_EVIDENCE_RETENTION_PREPARED',
+  'RUN_EVIDENCE_RETENTION_APPLIED', 'PROGRESS', 'CHECKPOINT', 'HEARTBEAT'
 )
 $allowedRoleStates = @(
   'PLANNED', 'ASSIGNED', 'RUNNING', 'WAITING_REVIEW', 'BLOCKED', 'READY_TO_RESUME',
@@ -31,6 +33,9 @@ $terminalRoleStates = @('DONE', 'FAILED', 'EXPIRED')
 $launchedRoleStates = @('RUNNING', 'WAITING_REVIEW', 'BLOCKED', 'READY_TO_RESUME', 'REPORT_READY', 'MERGE_READY')
 $allowedRunStates = @('STARTING', 'RUNNING', 'DONE', 'FAILED', 'EXIT_UNKNOWN', 'EXPIRED')
 $terminalRunStates = @('DONE', 'FAILED', 'EXIT_UNKNOWN', 'EXPIRED')
+$allowedDeliveryClassifications = @(
+  'PRODUCT_PATH_CLOSED', 'PRODUCT_PATH_ADVANCED', 'ENABLEMENT_ONLY', 'SPEC_ONLY', 'TEST_ONLY'
+)
 $requiredRoleFields = @(
   'role_id', 'role_name', 'scope_id', 'run_epoch', 'control_repo_id', 'state', 'assigned_by',
   'assignment_id', 'session_id', 'process_id', 'run_id', 'product_repo_id',
@@ -44,7 +49,14 @@ $requiredRunFields = @(
   'transport_mode', 'session_id', 'process_id', 'command', 'cwd', 'started_at', 'ended_at',
   'exit_code', 'status'
 )
-
+$structuredRetentionRunFields = @(
+  'run_root', 'retention_group_id', 'parent_run_id', 'review_gate', 'control_disposition'
+)
+$allowedReviewGates = @('PENDING', 'PASSED', 'FAILED', 'NOT_REQUIRED')
+$allowedControlDispositions = @(
+  'ACTIVE', 'UNREVIEWED', 'BLOCKING', 'RECOVERY', 'RECONCILIATION',
+  'SUPERSEDED', 'ACCEPTED', 'ARCHIVED', 'DISCARDABLE'
+)
 function Normalize-Path([string] $PathValue) {
   $fullPath = [System.IO.Path]::GetFullPath($PathValue)
   $pathRoot = [System.IO.Path]::GetPathRoot($fullPath)
@@ -56,6 +68,22 @@ function Test-PathWithin([string] $Child, [string] $Parent) {
   $childPath = (Normalize-Path $Child) + [System.IO.Path]::DirectorySeparatorChar
   $parentPath = (Normalize-Path $Parent) + [System.IO.Path]::DirectorySeparatorChar
   return $childPath.StartsWith($parentPath, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-CanonicalDateTimeOffsetText([object] $Value) {
+  if ($Value -isnot [string] -or [string]::IsNullOrWhiteSpace([string] $Value)) { return $false }
+  $parsed = [DateTimeOffset]::MinValue
+  $valid = [DateTimeOffset]::TryParseExact(
+    [string] $Value,
+    'o',
+    [Globalization.CultureInfo]::InvariantCulture,
+    [Globalization.DateTimeStyles]::RoundtripKind,
+    [ref] $parsed
+  )
+  return (
+    $valid -and
+    $parsed.ToString('o', [Globalization.CultureInfo]::InvariantCulture) -ceq [string] $Value
+  )
 }
 
 function Find-ReparsePointInExistingPathChain([string] $PathValue) {
@@ -329,6 +357,25 @@ foreach ($relative in $requiredFiles) {
   }
 }
 
+$retentionStableFiles = @(
+  'scripts/yefeng/compact-run-evidence.ps1',
+  'scripts/yefeng/run-retention-policy.json',
+  'scripts/yefeng/test-run-evidence-retention.ps1',
+  'scripts/yefeng/install-governed-runner.ps1',
+  'scripts/yefeng/validate-run-evidence-retention.ps1'
+)
+$presentRetentionFiles = [System.Collections.Generic.List[string]]::new()
+foreach ($relative in $retentionStableFiles) {
+  $retentionPath = Join-Path $controlRootPath $relative
+  if (-not (Test-Path -LiteralPath $retentionPath)) { continue }
+  if (-not (Test-InternalPathSafety $retentionPath $controlRootPath $relative)) { continue }
+  if (-not (Test-Path -LiteralPath $retentionPath -PathType Leaf)) {
+    $issues.Add("Installed retention artifact is not an ordinary leaf: $relative")
+    continue
+  }
+  $presentRetentionFiles.Add($relative)
+}
+
 $gitTopLevel = Invoke-GitRead $controlRootPath @('rev-parse', '--show-toplevel')
 if ($gitTopLevel) {
   if (-not (Normalize-Path $gitTopLevel).Equals($controlRootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -346,7 +393,7 @@ $productRepoIdSet = [System.Collections.Generic.HashSet[string]]::new([System.St
 $topologyPath = Join-Path $controlRootPath '.yefeng\control-plane.json'
 if ($requiredPathSafety['.yefeng/control-plane.json'] -and (Test-Path -LiteralPath $topologyPath)) {
   try {
-    $topology = Get-Content -LiteralPath $topologyPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    $topology = ConvertFrom-ControlJson (Get-Content -LiteralPath $topologyPath -Raw -Encoding UTF8)
   } catch {
     $issues.Add("Invalid control-plane.json: $($_.Exception.Message)")
   }
@@ -440,11 +487,12 @@ foreach ($scopeId in $scopeIds) {
   $controlStatePath = Join-Path $scopeRoot 'state\control.json'
   if (Test-Path -LiteralPath $controlStatePath) {
     try {
-      $controlState = Get-Content -LiteralPath $controlStatePath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+      $controlState = ConvertFrom-ControlJson (Get-Content -LiteralPath $controlStatePath -Raw -Encoding UTF8)
     } catch {
       $issues.Add("Invalid control state for ${scopeId}: $($_.Exception.Message)")
     }
   }
+  $outcomeLock = $null
   if ($controlState) {
     $controlStateByScope[$scopeId] = $controlState
     if ([int] $controlState.version -ne 2) { $issues.Add("Control state version must be 2 for $scopeId") }
@@ -460,6 +508,107 @@ foreach ($scopeId in $scopeIds) {
     }
     if ($controlState.startup_level -notin @('LEVEL_1_GOVERNANCE_BOOTSTRAP', 'LEVEL_2_SINGLE_THREAD_TOTAL_CONTROL', 'LEVEL_3_FULL_PARALLEL_YEFENG')) {
       $issues.Add("Invalid startup_level for $scopeId")
+    }
+    $controlStateProperties = @($controlState.PSObject.Properties | ForEach-Object { $_.Name })
+    $hasOutcomeLockSchema = $controlStateProperties -contains 'outcome_lock_schema_version'
+    $outcomeLockSchemaVersion = 0
+    if ($hasOutcomeLockSchema) {
+      if (
+        -not (Test-IsInteger $controlState.outcome_lock_schema_version) -or
+        [int64] $controlState.outcome_lock_schema_version -notin @(1, 2)
+      ) {
+        $issues.Add("Outcome-lock schema version must be 1 or 2 for $scopeId")
+      } else {
+        $outcomeLockSchemaVersion = [int] $controlState.outcome_lock_schema_version
+      }
+    }
+    $outcomeLock = $controlState.outcome_lock
+    if (-not $outcomeLock) {
+      if ($hasOutcomeLockSchema) {
+        $issues.Add("Outcome lock is required by the declared outcome-lock schema for $scopeId")
+      } elseif ($controlState.startup_level -ne 'LEVEL_1_GOVERNANCE_BOOTSTRAP') {
+        $issues.Add("Outcome lock is required before Level 2/3 implementation for $scopeId")
+      } else {
+        $warnings.Add("Legacy Level 1 control state has no outcome lock for $scopeId; synthesize it before implementation upgrade.")
+      }
+    } else {
+      $outcomeLockProperties = @($outcomeLock.PSObject.Properties | ForEach-Object { $_.Name })
+      if (-not $hasOutcomeLockSchema) {
+        $warnings.Add("Outcome lock has no schema marker for $scopeId; reconcile it before the next implementation dispatch.")
+        if ($outcomeLockProperties -contains 'capability_disposition') {
+          $outcomeLockSchemaVersion = 1
+        } elseif (
+          $outcomeLockProperties -contains 'existing_capability_inventory' -and
+          $outcomeLockProperties -contains 'reuse_adapt_new_defer'
+        ) {
+          $outcomeLockSchemaVersion = 2
+        }
+      }
+      $commonOutcomeFields = @(
+        'status', 'revision', 'user_objective', 'user_visible_proof', 'first_vertical_slice',
+        'mvp_scope', 'non_goals', 'approved_public_contract_families',
+        'allowed_invisible_prerequisite_depth', 'authorization_ceiling', 'auto_execution_boundary',
+        'ask_boundary', 'estimate_baseline', 'drift_thresholds', 'approved_by', 'approved_at'
+      )
+      $capabilityOutcomeFields = switch ($outcomeLockSchemaVersion) {
+        1 { @('capability_disposition') }
+        2 { @('existing_capability_inventory', 'reuse_adapt_new_defer') }
+        default { @('existing_capability_inventory', 'reuse_adapt_new_defer') }
+      }
+      foreach ($requiredOutcomeField in @($commonOutcomeFields + $capabilityOutcomeFields)) {
+        if ($outcomeLockProperties -notcontains $requiredOutcomeField) {
+          $issues.Add("Outcome lock is missing ${requiredOutcomeField} for $scopeId")
+        }
+      }
+      if ($outcomeLockSchemaVersion -eq 1) {
+        $warnings.Add("Outcome-lock schema v1 is legacy for $scopeId; reconcile capability inventory/disposition and numeric prerequisite depth into v2.")
+        if ($controlState.startup_level -ne 'LEVEL_1_GOVERNANCE_BOOTSTRAP') {
+          $issues.Add("Level 2/3 requires outcome-lock schema v2 for $scopeId")
+        }
+      }
+      if ([string] $outcomeLock.status -notin @('UNCONFIRMED', 'CONFIRMED')) {
+        $issues.Add("Outcome lock status is invalid for $scopeId")
+      }
+      $prerequisiteDepthIsValid = $false
+      if ($outcomeLockSchemaVersion -eq 1) {
+        $parsedLegacyDepth = 0
+        $prerequisiteDepthIsValid = (
+          [int]::TryParse([string] $outcomeLock.allowed_invisible_prerequisite_depth, [ref] $parsedLegacyDepth) -and
+          $parsedLegacyDepth -ge 0 -and $parsedLegacyDepth -le 16
+        )
+      } else {
+        $prerequisiteDepthIsValid = (
+          (Test-IsInteger $outcomeLock.allowed_invisible_prerequisite_depth) -and
+          [int64] $outcomeLock.allowed_invisible_prerequisite_depth -ge 0 -and
+          [int64] $outcomeLock.allowed_invisible_prerequisite_depth -le 16
+        )
+      }
+      if (-not $prerequisiteDepthIsValid) {
+        $issues.Add("Outcome lock invisible-prerequisite depth is invalid for $scopeId")
+      }
+      if ([string] $outcomeLock.status -eq 'CONFIRMED') {
+        $commonConfirmedFields = @(
+          'revision', 'user_objective', 'user_visible_proof', 'first_vertical_slice', 'mvp_scope',
+          'non_goals', 'approved_public_contract_families',
+          'authorization_ceiling', 'auto_execution_boundary', 'ask_boundary', 'estimate_baseline',
+          'drift_thresholds', 'approved_by', 'approved_at'
+        )
+        foreach ($confirmedField in @($commonConfirmedFields + $capabilityOutcomeFields)) {
+          $confirmedValue = [string] $outcomeLock.$confirmedField
+          if ([string]::IsNullOrWhiteSpace($confirmedValue) -or $confirmedValue -eq 'unconfirmed') {
+            $issues.Add("Confirmed outcome lock has no usable ${confirmedField} for $scopeId")
+          }
+        }
+        if (-not (Test-CanonicalDateTimeOffsetText $outcomeLock.approved_at)) {
+          $issues.Add("Confirmed outcome lock approved_at is not canonical for $scopeId")
+        }
+      }
+      if (
+        $controlState.startup_level -ne 'LEVEL_1_GOVERNANCE_BOOTSTRAP' -and
+        [string] $outcomeLock.status -ne 'CONFIRMED'
+      ) {
+        $issues.Add("Level 2/3 requires a CONFIRMED outcome lock for $scopeId")
+      }
     }
     $controlBaselineProperties = @()
     if ($controlState.product_baselines) { $controlBaselineProperties = @($controlState.product_baselines.PSObject.Properties) }
@@ -508,7 +657,7 @@ foreach ($scopeId in $scopeIds) {
   $rolesPath = Join-Path $scopeRoot 'state\roles.json'
   if (Test-Path -LiteralPath $rolesPath) {
     try {
-      $rolesState = Get-Content -LiteralPath $rolesPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+      $rolesState = ConvertFrom-ControlJson (Get-Content -LiteralPath $rolesPath -Raw -Encoding UTF8)
       if ([int] $rolesState.version -ne 2) { $issues.Add("Roles state version must be 2 for $scopeId") }
       if ($rolesState.run_epoch -ne $controlState.run_epoch) { $issues.Add("roles/control epoch mismatch for $scopeId") }
       if ($rolesState.scope_id -ne $scopeId -or $rolesState.control_repo_id -ne $topology.control_repo_id) { $issues.Add("roles file identity mismatch for $scopeId") }
@@ -531,6 +680,30 @@ foreach ($scopeId in $scopeIds) {
           $issues.Add("Role identity/epoch mismatch for ${scopeId}: $roleId")
         }
         if ($allowedRoleStates -notcontains $roleState) { $issues.Add("Invalid role state for ${scopeId}: $roleId / $roleState") }
+        if (
+          $outcomeLock -and [string] $outcomeLock.status -eq 'CONFIRMED' -and
+          $roleEpoch -eq [int] $rolesState.run_epoch -and $roleState -ne 'PLANNED'
+        ) {
+          foreach ($requiredOutcomeRoleField in @(
+            'outcome_lock_revision', 'delivery_classification', 'user_visible_proof', 'immediate_product_consumer'
+          )) {
+            if ($rolePropertyNames -notcontains $requiredOutcomeRoleField) {
+              $issues.Add("Active role is missing ${requiredOutcomeRoleField} for ${scopeId}: $roleId")
+            }
+          }
+          if ([string] $role.outcome_lock_revision -ne [string] $outcomeLock.revision) {
+            $issues.Add("Active role outcome-lock revision mismatch for ${scopeId}: $roleId")
+          }
+          if ([string] $role.delivery_classification -notin $allowedDeliveryClassifications) {
+            $issues.Add("Active role delivery classification is invalid for ${scopeId}: $roleId")
+          }
+          if (
+            [string] $role.delivery_classification -eq 'ENABLEMENT_ONLY' -and
+            [string]::IsNullOrWhiteSpace([string] $role.immediate_product_consumer)
+          ) {
+            $issues.Add("Enablement-only role has no immediate product consumer for ${scopeId}: $roleId")
+          }
+        }
         $hasLease = -not [string]::IsNullOrWhiteSpace([string] $role.lease_expires_at)
         if ($roleEpoch -lt [int] $rolesState.run_epoch -and ($terminalRoleStates -notcontains $roleState -or $hasLease)) {
           $issues.Add("Stale role is active or leased for ${scopeId}: $roleId")
@@ -605,7 +778,7 @@ foreach ($scopeId in $scopeIds) {
   $runsPath = Join-Path $scopeRoot 'state\runs.json'
   if (Test-Path -LiteralPath $runsPath) {
     try {
-      $runsState = Get-Content -LiteralPath $runsPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+      $runsState = ConvertFrom-ControlJson (Get-Content -LiteralPath $runsPath -Raw -Encoding UTF8)
       if ([int] $runsState.version -ne 2) { $issues.Add("Runs state version must be 2 for $scopeId") }
       if ($runsState.run_epoch -ne $controlState.run_epoch) { $issues.Add("runs/control epoch mismatch for $scopeId") }
       if ($runsState.scope_id -ne $scopeId -or $runsState.control_repo_id -ne $topology.control_repo_id) { $issues.Add("runs file identity mismatch for $scopeId") }
@@ -622,6 +795,46 @@ foreach ($scopeId in $scopeIds) {
           continue
         }
         $runsById[$runId] = $run
+        $hasCompleteRetentionBinding = $true
+        foreach ($retentionField in $structuredRetentionRunFields) {
+          if ($runPropertyNames -notcontains $retentionField) {
+            $hasCompleteRetentionBinding = $false
+            break
+          }
+        }
+        if ($hasCompleteRetentionBinding) {
+          $retentionPathIdPattern = '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
+          if ($runId -notmatch $retentionPathIdPattern -or [string] $run.role_id -notmatch $retentionPathIdPattern) {
+            $issues.Add("Structured retention binding uses a path-unsafe role/run ID for ${scopeId}: $runId")
+          }
+          if ([string] $run.retention_group_id -notmatch $retentionPathIdPattern) {
+            $issues.Add("Structured retention_group_id is invalid for ${scopeId}: $runId")
+          }
+          $parentRunId = [string] $run.parent_run_id
+          if (
+            -not [string]::IsNullOrWhiteSpace($parentRunId) -and
+            ($parentRunId -notmatch $retentionPathIdPattern -or $parentRunId -eq $runId)
+          ) {
+            $issues.Add("Structured parent_run_id is invalid for ${scopeId}: $runId")
+          }
+          if ($allowedReviewGates -notcontains [string] $run.review_gate) {
+            $issues.Add("Structured review_gate is invalid for ${scopeId}: $runId")
+          }
+          if ($allowedControlDispositions -notcontains [string] $run.control_disposition) {
+            $issues.Add("Structured control_disposition is invalid for ${scopeId}: $runId")
+          }
+          $normalizedRunRoot = ([string] $run.run_root).Replace('\', '/').TrimEnd('/')
+          $expectedRunRoot = ".yefeng/runs/$scopeId/$($run.role_id)/$runId"
+          if ($normalizedRunRoot -cne $expectedRunRoot) {
+            $issues.Add("Structured run_root binding mismatch for ${scopeId}: $runId")
+          }
+          if (
+            [string] $run.review_gate -eq 'PENDING' -and
+            [string] $run.control_disposition -in @('SUPERSEDED', 'ARCHIVED', 'DISCARDABLE')
+          ) {
+            $issues.Add("Pending review is marked compactable for ${scopeId}: $runId")
+          }
+        }
         $runEpoch = [int] $run.run_epoch
         $runState = [string] $run.status
         if ($run.scope_id -ne $scopeId -or $run.control_repo_id -ne $topology.control_repo_id -or $runEpoch -lt 1 -or $runEpoch -gt [int] $runsState.run_epoch) {
@@ -648,11 +861,8 @@ foreach ($scopeId in $scopeIds) {
         try { $null = [DateTimeOffset]::Parse([string] $run.started_at) }
         catch { $issues.Add("Run started_at is invalid for ${scopeId}: $runId") }
         if ($terminalRunStates -contains $runState) {
-          if ([string]::IsNullOrWhiteSpace([string] $run.ended_at)) {
-            $issues.Add("Terminal run ended_at is missing for ${scopeId}: $runId")
-          } else {
-            try { $null = [DateTimeOffset]::Parse([string] $run.ended_at) }
-            catch { $issues.Add("Terminal run ended_at is invalid for ${scopeId}: $runId") }
+          if (-not (Test-CanonicalDateTimeOffsetText $run.ended_at)) {
+            $issues.Add("Terminal run ended_at must be canonical DateTimeOffset.ToString('o') for ${scopeId}: $runId")
           }
         }
         if ([string] $run.product_worktree -ne [string] $run.cwd) {
@@ -704,6 +914,16 @@ foreach ($scopeId in $scopeIds) {
           $issues.Add("Role references a missing run for ${scopeId}: $($roleRunEntry.Value.role_id) / $($roleRunEntry.Key)")
         }
       }
+      foreach ($run in @($runsState.runs)) {
+        $runPropertyNames = @($run.PSObject.Properties | ForEach-Object { $_.Name })
+        $hasCompleteRetentionBinding = @($structuredRetentionRunFields | Where-Object { $runPropertyNames -contains $_ }).Count -eq $structuredRetentionRunFields.Count
+        if ($hasCompleteRetentionBinding) {
+          $parentRunId = [string] $run.parent_run_id
+          if (-not [string]::IsNullOrWhiteSpace($parentRunId) -and -not $runsById.ContainsKey($parentRunId)) {
+            $issues.Add("Structured parent run is missing for ${scopeId}: $($run.run_id) / $parentRunId")
+          }
+        }
+      }
       if ($controlState.startup_level -eq 'LEVEL_1_GOVERNANCE_BOOTSTRAP' -and @($runsState.runs).Count -gt 0) {
         $issues.Add("Level 1 contains run records for $scopeId")
       }
@@ -716,7 +936,7 @@ foreach ($scopeId in $scopeIds) {
   $transportPath = Join-Path $scopeRoot 'state\transport.json'
   if (Test-Path -LiteralPath $transportPath) {
     try {
-      $transportState = Get-Content -LiteralPath $transportPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+      $transportState = ConvertFrom-ControlJson (Get-Content -LiteralPath $transportPath -Raw -Encoding UTF8)
       if ([int] $transportState.version -ne 2) { $issues.Add("Transport state version must be 2 for $scopeId") }
       if ($transportState.scope_id -ne $scopeId) { $issues.Add("Transport state scope mismatch: $scopeId") }
       if ($transportState.control_repo_id -ne $topology.control_repo_id) { $issues.Add("Transport control_repo_id mismatch: $scopeId") }
@@ -735,6 +955,7 @@ foreach ($scopeId in $scopeIds) {
   $eventsPath = Join-Path $scopeRoot 'events.jsonl'
   $eventIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
   $receiptByMessageId = @{}
+  $retentionPreparedKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
   if (Test-Path -LiteralPath $eventsPath) {
     $lineNumber = 0
     foreach ($line in Get-Content -LiteralPath $eventsPath -Encoding UTF8) {
@@ -745,7 +966,7 @@ foreach ($scopeId in $scopeIds) {
         continue
       }
       try {
-        $event = $line | ConvertFrom-Json -ErrorAction Stop
+        $event = ConvertFrom-ControlJson $line
         if ([string]::IsNullOrWhiteSpace($event.event_id)) { $issues.Add("Missing event_id at $scopeId line $lineNumber") }
         elseif ($event.event_id -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$') { $issues.Add("Invalid event_id at $scopeId line $lineNumber") }
         elseif (-not $eventIds.Add([string] $event.event_id)) { $issues.Add("Duplicate event_id at $scopeId line ${lineNumber}: $($event.event_id)") }
@@ -787,7 +1008,7 @@ foreach ($scopeId in $scopeIds) {
         }
         try { $null = [DateTimeOffset]::Parse([string] $event.created_at) }
         catch { $issues.Add("Invalid event created_at at $scopeId line $lineNumber") }
-        if ($event.type -in @('CONTROL_BOOTSTRAPPED', 'INTEGRATION_INTENT', 'PRODUCT_COMMITTED', 'PRODUCT_VERIFIED', 'CONTROL_COMMITTED', 'RECONCILIATION_REQUIRED', 'RECOVERY_STARTED', 'RECOVERY_COMPLETED') -and [string]::IsNullOrWhiteSpace($event.operation_id)) {
+        if ($event.type -in @('CONTROL_BOOTSTRAPPED', 'INTEGRATION_INTENT', 'PRODUCT_COMMITTED', 'PRODUCT_VERIFIED', 'CONTROL_COMMITTED', 'RECONCILIATION_REQUIRED', 'RECOVERY_STARTED', 'RECOVERY_COMPLETED', 'RUN_EVIDENCE_RETENTION_PREPARED', 'RUN_EVIDENCE_RETENTION_APPLIED') -and [string]::IsNullOrWhiteSpace($event.operation_id)) {
           $issues.Add("Event operation_id is required for $($event.type) at $scopeId line $lineNumber")
         }
         if ($event.type -in @('CONTROL_BOOTSTRAPPED', 'PRODUCT_COMMITTED', 'PRODUCT_VERIFIED', 'CONTROL_COMMITTED', 'BASELINE_UPDATED') -and [string]::IsNullOrWhiteSpace($event.product_baseline_commit) -and [string]::IsNullOrWhiteSpace($event.product_commit)) {
@@ -822,6 +1043,41 @@ foreach ($scopeId in $scopeIds) {
             $event.previous_writer_id -eq $event.replacement_writer_id
           ) {
             $issues.Add("RECOVERY_STARTED transition identity is incomplete at $scopeId line $lineNumber")
+          }
+        }
+        if ($event.type -eq 'RUN_EVIDENCE_RETENTION_PREPARED') {
+          $preparedFields = @(
+            'event_id', 'type', 'operation_id', 'created_at', 'scope_id', 'run_epoch',
+            'control_repo_id', 'product_repo_id', 'prepared_parent_control_head',
+            'plan_digest', 'policy_sha256', 'state_hashes', 'apply_token_sha256',
+            'candidate_summary', 'reference_set_sha256'
+          )
+          Assert-ExactProperties "RUN_EVIDENCE_RETENTION_PREPARED at $scopeId line $lineNumber" $event $preparedFields
+          foreach ($digestField in @('plan_digest', 'policy_sha256', 'apply_token_sha256', 'reference_set_sha256')) {
+            if ([string] $event.$digestField -notmatch '^[A-Fa-f0-9]{64}$') {
+              $issues.Add("PREPARED digest is invalid for $digestField at $scopeId line $lineNumber")
+            }
+          }
+          if ([string] $event.prepared_parent_control_head -notmatch '^[A-Fa-f0-9]{40,64}$') {
+            $issues.Add("PREPARED parent control HEAD is invalid at $scopeId line $lineNumber")
+          }
+          foreach ($stateName in @('runs', 'roles', 'control', 'transport')) {
+            if ([string] $event.state_hashes.$stateName -notmatch '^[A-Fa-f0-9]{64}$') {
+              $issues.Add("PREPARED state hash is invalid for $stateName at $scopeId line $lineNumber")
+            }
+          }
+          if (
+            -not (Test-IsInteger $event.candidate_summary.count) -or
+            -not (Test-IsInteger $event.candidate_summary.bytes) -or
+            [int64] $event.candidate_summary.count -lt 0 -or
+            [int64] $event.candidate_summary.bytes -lt 0 -or
+            [string] $event.candidate_summary.sha256 -notmatch '^[A-Fa-f0-9]{64}$'
+          ) {
+            $issues.Add("PREPARED candidate summary is invalid at $scopeId line $lineNumber")
+          }
+          $preparedKey = "$($event.scope_id):$($event.run_epoch):$($event.plan_digest)"
+          if (-not $retentionPreparedKeys.Add($preparedKey)) {
+            $issues.Add("Duplicate PREPARED plan binding at $scopeId line ${lineNumber}: $($event.plan_digest)")
           }
         }
       }
@@ -924,7 +1180,7 @@ foreach ($probe in @('.yefeng/local/roots.json', '.yefeng/local/locks/control-re
 $localRootsPath = Join-Path $controlRootPath '.yefeng\local\roots.json'
 $localRoots = $null
 if ((Test-InternalPathSafety $localRootsPath $controlRootPath 'local roots') -and (Test-Path -LiteralPath $localRootsPath)) {
-  try { $localRoots = Get-Content -LiteralPath $localRootsPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop }
+  try { $localRoots = ConvertFrom-ControlJson (Get-Content -LiteralPath $localRootsPath -Raw -Encoding UTF8) }
   catch { $issues.Add("Invalid local roots JSON: $($_.Exception.Message)") }
 }
 
@@ -1032,7 +1288,7 @@ if ($RequireCommitted) {
     $issues.Add('Missing repository control HEAD state.')
   } else {
     try {
-      $controlHeadState = Get-Content -LiteralPath $controlHeadPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+      $controlHeadState = ConvertFrom-ControlJson (Get-Content -LiteralPath $controlHeadPath -Raw -Encoding UTF8)
       if ($controlHeadState.control_repo_id -ne $topology.control_repo_id) { $issues.Add('Repository control HEAD identity mismatch.') }
       if ($controlHeadState.expected_control_head -ne $controlHead) { $issues.Add('Repository control HEAD is not reconciled.') }
     } catch {
@@ -1164,7 +1420,7 @@ if ($RequireCommitted) {
     }
   }
 
-  $stableRequiredFiles = @(@($requiredFiles) + @($scopeStableRelativePaths) | Select-Object -Unique)
+  $stableRequiredFiles = @(@($requiredFiles) + @($scopeStableRelativePaths) + @($presentRetentionFiles) | Select-Object -Unique)
   foreach ($relative in $stableRequiredFiles) {
     if (-not $ordinaryIndexByPath.ContainsKey($relative)) {
       $issues.Add("Required stable file is not tracked: $relative")
@@ -1192,6 +1448,7 @@ $result = [ordered]@{
   product_statuses = $productStatuses
   scopes = $scopeIds
   issues = @($issues)
+  warnings = @($warnings)
 }
 
 $result | ConvertTo-Json -Depth 20

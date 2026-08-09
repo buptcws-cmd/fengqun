@@ -19,6 +19,26 @@ param(
   [string] $ProductRepoId = "",
   [string] $ProductBranch = "",
   [string] $ModuleGoal = "Define and deliver the governed module outcome.",
+  [string] $UserObjective = "",
+  [ValidateSet('UNCONFIRMED', 'CONFIRMED')]
+  [string] $OutcomeLockStatus = "UNCONFIRMED",
+  [string] $OutcomeLockRevision = "unconfirmed",
+  [string] $UserVisibleProof = "unconfirmed",
+  [string] $FirstVerticalSlice = "unconfirmed",
+  [string] $MvpScope = "unconfirmed",
+  [string] $NonGoals = "unconfirmed",
+  [string] $ExistingCapabilityInventory = "unconfirmed",
+  [string] $ReuseAdaptNewDefer = "unconfirmed",
+  [string] $ApprovedPublicContractFamilies = "unconfirmed",
+  [ValidateRange(0, 16)]
+  [int] $InvisiblePrerequisiteDepth = 1,
+  [string] $AuthorizationCeiling = "unconfirmed",
+  [string] $AutoExecutionBoundary = "current outcome lock and recorded authorization policy",
+  [string] $AskBoundary = "changes to outcome, scope, risk, or estimate beyond recorded thresholds",
+  [string] $EstimateBaseline = "unconfirmed",
+  [string] $DriftThresholds = "unconfirmed",
+  [string] $OutcomeApprovedBy = "unconfirmed",
+  [string] $OutcomeApprovedAt = "unconfirmed",
   [string] $TokenBudget = "unspecified",
   [string] $ModuleSoftBudget = "unspecified",
   [ValidateSet('LEVEL_1_GOVERNANCE_BOOTSTRAP')]
@@ -235,6 +255,46 @@ if ([string]::IsNullOrWhiteSpace($ControlRepoId)) {
 if ([string]::IsNullOrWhiteSpace($ProductRepoId)) {
   $ProductRepoId = $ProjectId
 }
+if ([string]::IsNullOrWhiteSpace($UserObjective)) {
+  $UserObjective = $ModuleGoal
+}
+if ($OutcomeLockStatus -eq 'CONFIRMED') {
+  $confirmedOutcomeValues = [ordered]@{
+    OutcomeLockRevision = $OutcomeLockRevision
+    UserObjective = $UserObjective
+    UserVisibleProof = $UserVisibleProof
+    FirstVerticalSlice = $FirstVerticalSlice
+    MvpScope = $MvpScope
+    NonGoals = $NonGoals
+    ExistingCapabilityInventory = $ExistingCapabilityInventory
+    ReuseAdaptNewDefer = $ReuseAdaptNewDefer
+    ApprovedPublicContractFamilies = $ApprovedPublicContractFamilies
+    AuthorizationCeiling = $AuthorizationCeiling
+    AutoExecutionBoundary = $AutoExecutionBoundary
+    AskBoundary = $AskBoundary
+    EstimateBaseline = $EstimateBaseline
+    DriftThresholds = $DriftThresholds
+    OutcomeApprovedBy = $OutcomeApprovedBy
+    OutcomeApprovedAt = $OutcomeApprovedAt
+  }
+  foreach ($confirmedOutcomeEntry in $confirmedOutcomeValues.GetEnumerator()) {
+    $confirmedOutcomeValue = [string] $confirmedOutcomeEntry.Value
+    if ([string]::IsNullOrWhiteSpace($confirmedOutcomeValue) -or $confirmedOutcomeValue -eq 'unconfirmed') {
+      throw "Confirmed outcome lock requires $($confirmedOutcomeEntry.Key)."
+    }
+  }
+  $parsedOutcomeApprovedAt = [DateTimeOffset]::MinValue
+  $outcomeApprovedAtIsCanonical = [DateTimeOffset]::TryParseExact(
+    $OutcomeApprovedAt,
+    'o',
+    [Globalization.CultureInfo]::InvariantCulture,
+    [Globalization.DateTimeStyles]::RoundtripKind,
+    [ref] $parsedOutcomeApprovedAt
+  ) -and $parsedOutcomeApprovedAt.ToString('o', [Globalization.CultureInfo]::InvariantCulture) -ceq $OutcomeApprovedAt
+  if (-not $outcomeApprovedAtIsCanonical) {
+    throw 'Confirmed outcome lock requires canonical OutcomeApprovedAt in DateTimeOffset o format.'
+  }
+}
 
 Assert-StableId 'ControlRepoId' $ControlRepoId
 Assert-StableId 'ProductRepoId' $ProductRepoId
@@ -296,6 +356,26 @@ $replacementValues = [ordered]@{
   '__PRODUCT_BRANCH__' = $ProductBranch
   '__PRODUCT_BASELINE__' = $productBaseline
   '__MODULE_GOAL__' = $ModuleGoal
+  '__USER_OBJECTIVE__' = $UserObjective
+  '__OUTCOME_LOCK_STATUS__' = $OutcomeLockStatus
+  '__OUTCOME_LOCK_REVISION__' = $OutcomeLockRevision
+  '__USER_VISIBLE_PROOF__' = $UserVisibleProof
+  '__FIRST_VERTICAL_SLICE__' = $FirstVerticalSlice
+  '__MVP_SCOPE__' = $MvpScope
+  '__NON_GOALS__' = $NonGoals
+  '__MVP_AND_NON_GOALS__' = "$MvpScope / non-goals: $NonGoals"
+  '__EXISTING_CAPABILITY_INVENTORY__' = $ExistingCapabilityInventory
+  '__REUSE_ADAPT_NEW_DEFER__' = $ReuseAdaptNewDefer
+  '__APPROVED_PUBLIC_CONTRACT_FAMILIES__' = $ApprovedPublicContractFamilies
+  '__INVISIBLE_PREREQUISITE_DEPTH__' = [string] $InvisiblePrerequisiteDepth
+  '__AUTHORIZATION_CEILING__' = $AuthorizationCeiling
+  '__AUTO_EXECUTION_BOUNDARY__' = $AutoExecutionBoundary
+  '__ASK_BOUNDARY__' = $AskBoundary
+  '__ESTIMATE_BASELINE__' = $EstimateBaseline
+  '__DRIFT_THRESHOLDS__' = $DriftThresholds
+  '__ESTIMATE_AND_DRIFT_THRESHOLDS__' = "$EstimateBaseline / drift: $DriftThresholds"
+  '__OUTCOME_APPROVED_BY__' = $OutcomeApprovedBy
+  '__OUTCOME_APPROVED_AT__' = $OutcomeApprovedAt
   '__TOKEN_BUDGET__' = $TokenBudget
   '__MODULE_SOFT_BUDGET__' = $ModuleSoftBudget
   '__STARTUP_LEVEL__' = $StartupLevel
