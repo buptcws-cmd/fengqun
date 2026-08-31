@@ -13,7 +13,9 @@ Read this reference before assessing, compacting, archiving, or deleting ignored
 
 ## Purpose
 
-Compact semantic duplicates after a completed batch without weakening active review, recovery, or audit evidence. This is evidence lifecycle management, not a generic disk cleanup command.
+Compact semantic duplicates after a completed external-control batch without weakening active review, recovery, or audit evidence. This is evidence lifecycle management, not a generic disk cleanup command.
+
+The bundled compactor is intentionally `external-git` only. It requires `.yefeng/control-plane.json` to declare `control_plane_mode: external-git`, requires the requested scope to be active, and uses `.yefeng/series/<scope_id>/state/**`. Do not run it against embedded `.yefeng/state/**`; retain embedded logs and record cleanup debt until a separately reviewed embedded implementation exists.
 
 Use the bundled files:
 

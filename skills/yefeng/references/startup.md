@@ -2,6 +2,8 @@
 
 Use this reference when a project is new, not yet safely parallelizable, or still needs product, architecture, task, or authorization decisions before full 野蜂 orchestration.
 
+Also read `outcome-and-scope-control.md` completely before authorizing implementation. Startup level controls what operations may run; the outcome lock controls what product result those operations may pursue.
+
 During Level 0 or Level 1, choose `embedded` or `external-git`. For `external-git`, read `external-control-repo.md` completely before creating files.
 
 ## Contents
@@ -23,6 +25,7 @@ Use when:
 - the user is still exploring direction;
 - product goals or non-goals are unclear;
 - technical stack or architecture decisions are unresolved;
+- the user-visible proof, MVP/non-goals, or meaning of default approval is unresolved;
 - a standard task template or project startup intake is needed before edits.
 
 Allowed:
@@ -54,6 +57,7 @@ Allowed:
 - create embedded `.yefeng/state/roles.json`, `.yefeng/state/runs.json`, `.yefeng/events.jsonl`, or the namespaced external equivalents;
 - create role pool proposals with roles in `PLANNED`;
 - create a first-slice contract;
+- record an outcome lock and the operational-versus-intent authorization boundary;
 - record authorization policy and startup level decision;
 - initialize an independent external Git control repository when `control_plane_mode=external-git`;
 - record stable repo/scope IDs, ignored local root bindings, product baseline commits, and roles in `PLANNED`.
@@ -79,6 +83,7 @@ Use when:
 Allowed:
 
 - advance a small checkpoint directly;
+- prove the first reuse-first vertical product slice against the current outcome lock;
 - update task registry and status snapshot;
 - run local validation;
 - commit governance and implementation changes if authorized by policy.
@@ -118,6 +123,11 @@ For `external-git` plus `control-spool`, this is the first level that may start 
 项目目标：
 当前阶段：
 非目标：
+outcome_lock_revision：
+outcome_lock_status：UNCONFIRMED / CONFIRMED
+approved_by / approved_at：
+用户可见验收证明：
+MVP 范围：
 产品/技术约束：
 已有文档：
 control_plane_mode：embedded / external-git
@@ -133,6 +143,13 @@ broker_poll_interval_ms：
 产品仓 locator 策略：tracked pointer / local binding / prompt-required
 第一条用户闭环：
 首个可验证切片：
+现有能力清单：
+reuse / adapt / new / defer：
+已批准公共契约族：
+允许的不可见前置层数：
+默认批准覆盖的执行动作：
+仍需 ASK 的产品/风险决策：
+估时基线与偏移阈值：
 需要用户决策：
 推荐启动档位：
 选择理由：
@@ -150,6 +167,13 @@ broker_poll_interval_ms：
 control_plane_mode：
 control_repo_id / scope_id：
 产品仓映射与 baseline：
+outcome_lock_revision：
+outcome_lock_status：UNCONFIRMED / CONFIRMED
+approved_by / approved_at：
+用户可见验收证明：
+MVP / 非目标：
+复用优先与首个纵向切片：
+估时基线 / 偏移阈值：
 本机 root 绑定位置：
 transport 与 sandbox probe：
 允许执行：
@@ -175,14 +199,29 @@ worktree/branch 策略：
 ```md
 # 第一实现切片
 
+outcome_lock_revision：
+outcome_lock_status：CONFIRMED
+approved_by / approved_at：
 目标：
 用户路径：
+用户可见验收证明：
+现有能力清单：
+reuse / adapt / new / defer：
+首个纵向切片：
+直接消费本切片的生产路径：
+不可见前置及最大深度：
 数据模型：
 API：
 前端：
+公共契约族：
 写入范围：
 验收标准：
 明确不做：
+默认自动执行范围：
+必须批量询问的边界：
+估时基线：
+偏移熔断阈值：
+交付分类：PRODUCT_PATH_CLOSED / PRODUCT_PATH_ADVANCED / ENABLEMENT_ONLY / SPEC_ONLY / TEST_ONLY
 验证方式：
 升级/拆分条件：
 ```
@@ -192,6 +231,10 @@ API：
 Before upgrading from `LEVEL_1_GOVERNANCE_BOOTSTRAP` to `LEVEL_2_SINGLE_THREAD_TOTAL_CONTROL`, confirm:
 
 - the first slice is defined;
+- the outcome lock names a real user-visible proof and first vertical product path;
+- existing capabilities are classified as reuse/adapt/new/defer before a new subsystem is approved;
+- default approval is recorded as execution authority, with intent/scope ASK boundaries and an operator permission ceiling;
+- estimate baseline, invisible-prerequisite limit, and scope-drift thresholds are recorded;
 - write scope is narrow;
 - non-goals are explicit;
 - validation can be run locally;

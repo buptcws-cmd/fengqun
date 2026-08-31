@@ -136,6 +136,12 @@ function New-ControlFixture([string]$Name, [object[]]$Runs, [string[]]$RoleRefer
   $root = Join-Path $testRoot $Name
   Initialize-GitRoot $root
   Write-Utf8 (Join-Path $root '.gitignore') ".yefeng/runs/`n"
+  Write-JsonFile (Join-Path $root '.yefeng\control-plane.json') ([ordered]@{
+    version = 2
+    control_plane_mode = 'external-git'
+    control_repo_id = 'control'
+    active_scopes = @('scope')
+  })
   $stateRoot = Join-Path $root '.yefeng\series\scope\state'
   Write-JsonFile (Join-Path $stateRoot 'runs.json') ([ordered]@{
     version = 2; scope_id = 'scope'; run_epoch = 1; control_repo_id = 'control'; runs = $Runs
@@ -302,6 +308,79 @@ function Invoke-Validator([string]$Root, [string]$ScriptPath = $validatorPath) {
 
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 try {
+  $junctionDestination = Join-Path $testRoot 'runner-junction-destination'
+  Initialize-GitRoot $junctionDestination
+  $junctionScripts = Join-Path $junctionDestination 'scripts\yefeng'
+  New-Item -ItemType Directory -Path $junctionScripts -Force | Out-Null
+  $junctionOutside = Join-Path $testRoot 'runner-junction-outside'
+  New-Item -ItemType Directory -Path $junctionOutside -Force | Out-Null
+  $junctionSentinel = Join-Path $junctionOutside 'sentinel.txt'
+  Write-Utf8 $junctionSentinel 'junction-sentinel'
+  New-Item -ItemType Junction -Path (Join-Path $junctionScripts 'lib') -Target $junctionOutside | Out-Null
+  $junctionRejected = $false
+  try {
+    & $installerPath -DestinationControlRoot $junctionDestination -TestDestinationPreflightOnly | Out-Null
+  } catch { $junctionRejected = $_.Exception.Message -match 'reparse point' }
+  Assert-True $junctionRejected 'full runner destination preflight must reject a lib junction'
+  Assert-True (
+    [System.IO.File]::ReadAllText($junctionSentinel, $utf8NoBom) -ceq 'junction-sentinel' -and
+    -not (Test-Path -LiteralPath (Join-Path $junctionOutside 'runner-common.ps1'))
+  ) 'lib junction rejection must leave the external target unchanged'
+
+  $symlinkDestination = Join-Path $testRoot 'runner-symlink-destination'
+  Initialize-GitRoot $symlinkDestination
+  $symlinkScripts = Join-Path $symlinkDestination 'scripts\yefeng'
+  New-Item -ItemType Directory -Path $symlinkScripts -Force | Out-Null
+  $symlinkSentinel = Join-Path $testRoot 'runner-symlink-sentinel.ps1'
+  Write-Utf8 $symlinkSentinel 'symlink-sentinel'
+  $symlinkPath = Join-Path $symlinkScripts 'role-runner.ps1'
+  $symlinkCreated = $false
+  try {
+    New-Item -ItemType SymbolicLink -Path $symlinkPath -Target $symlinkSentinel -ErrorAction Stop | Out-Null
+    $symlinkCreated = $true
+  } catch {
+    Write-Verbose "Runner leaf symlink regression was not available on this host: $($_.Exception.Message)"
+  }
+  if ($symlinkCreated) {
+    $symlinkRejected = $false
+    try {
+      & $installerPath -DestinationControlRoot $symlinkDestination -TestDestinationPreflightOnly | Out-Null
+    } catch { $symlinkRejected = $_.Exception.Message -match 'reparse point' }
+    Assert-True $symlinkRejected 'full runner destination preflight must reject a runner leaf symlink'
+    Assert-True (
+      [System.IO.File]::ReadAllText($symlinkSentinel, $utf8NoBom) -ceq 'symlink-sentinel'
+    ) 'runner leaf symlink rejection must leave the external target unchanged'
+  }
+
+  $hardlinkDestination = Join-Path $testRoot 'runner-hardlink-destination'
+  Initialize-GitRoot $hardlinkDestination
+  $hardlinkScripts = Join-Path $hardlinkDestination 'scripts\yefeng'
+  New-Item -ItemType Directory -Path $hardlinkScripts -Force | Out-Null
+  $hardlinkSentinel = Join-Path $testRoot 'runner-hardlink-sentinel.ps1'
+  Write-Utf8 $hardlinkSentinel 'hardlink-sentinel'
+  $hardlinkPath = Join-Path $hardlinkScripts 'role-runner.ps1'
+  New-Item -ItemType HardLink -Path $hardlinkPath -Target $hardlinkSentinel -ErrorAction Stop | Out-Null
+  $hardlinkRejected = $false
+  try {
+    & $installerPath -DestinationControlRoot $hardlinkDestination -TestDestinationPreflightOnly | Out-Null
+  } catch { $hardlinkRejected = $_.Exception.Message -match 'hard link|hardlink' }
+  Assert-True $hardlinkRejected 'full runner destination preflight must reject a runner leaf hardlink'
+  Assert-True (
+    [System.IO.File]::ReadAllText($hardlinkSentinel, $utf8NoBom) -ceq 'hardlink-sentinel'
+  ) 'runner leaf hardlink rejection must leave the external target unchanged'
+
+  $embeddedRoot = New-ControlFixture 'embedded-topology' @()
+  $embeddedTopologyPath = Join-Path $embeddedRoot '.yefeng\control-plane.json'
+  $embeddedTopology = Get-Content -LiteralPath $embeddedTopologyPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  $embeddedTopology.control_plane_mode = 'embedded'
+  Write-JsonFile $embeddedTopologyPath $embeddedTopology
+  $null = Invoke-Git $embeddedRoot @('add', '--all')
+  $null = Invoke-Git $embeddedRoot @('commit', '-m', 'embedded topology')
+  $embeddedRejected = $false
+  try { Invoke-DryRun $embeddedRoot $defaultPolicyPath | Out-Null }
+  catch { $embeddedRejected = $_.Exception.Message -match 'only control_plane_mode external-git' }
+  Assert-True $embeddedRejected 'bundled retention compactor must fail closed for embedded topology'
+
   $policyPath = Join-Path $testRoot 'policy.json'
   New-TestPolicy $policyPath
   $old = [DateTimeOffset]::UtcNow.AddDays(-10)

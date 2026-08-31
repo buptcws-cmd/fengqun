@@ -15,6 +15,7 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8NoBom
 $OutputEncoding = $utf8NoBom
 $issues = [System.Collections.Generic.List[string]]::new()
+$warnings = [System.Collections.Generic.List[string]]::new()
 $knownEventTypes = @(
   'CONTROL_BOOTSTRAPPED', 'ROLE_ASSIGNED', 'ROLE_STARTED', 'ROLE_OUTPUT', 'ROLE_BLOCKED',
   'ROLE_READY_TO_RESUME', 'ROLE_DONE', 'QUESTION', 'ANSWER', 'BLOCKER', 'CONTRACT_CHANGE',
@@ -22,7 +23,7 @@ $knownEventTypes = @(
   'PRODUCT_COMMITTED', 'PRODUCT_VERIFIED', 'CONTROL_COMMITTED', 'RECONCILIATION_REQUIRED',
   'IMPORT_RECEIPT', 'RECOVERY_STARTED', 'RECOVERY_COMPLETED', 'RESUME_NOTICE',
   'USER_DECISION_REQUIRED', 'DIRECTIVE', 'RUN_EVIDENCE_RETENTION_PREPARED',
-  'RUN_EVIDENCE_RETENTION_APPLIED'
+  'RUN_EVIDENCE_RETENTION_APPLIED', 'PROGRESS', 'CHECKPOINT', 'HEARTBEAT'
 )
 $allowedRoleStates = @(
   'PLANNED', 'ASSIGNED', 'RUNNING', 'WAITING_REVIEW', 'BLOCKED', 'READY_TO_RESUME',
@@ -32,6 +33,9 @@ $terminalRoleStates = @('DONE', 'FAILED', 'EXPIRED')
 $launchedRoleStates = @('RUNNING', 'WAITING_REVIEW', 'BLOCKED', 'READY_TO_RESUME', 'REPORT_READY', 'MERGE_READY')
 $allowedRunStates = @('STARTING', 'RUNNING', 'DONE', 'FAILED', 'EXIT_UNKNOWN', 'EXPIRED')
 $terminalRunStates = @('DONE', 'FAILED', 'EXIT_UNKNOWN', 'EXPIRED')
+$allowedDeliveryClassifications = @(
+  'PRODUCT_PATH_CLOSED', 'PRODUCT_PATH_ADVANCED', 'ENABLEMENT_ONLY', 'SPEC_ONLY', 'TEST_ONLY'
+)
 $requiredRoleFields = @(
   'role_id', 'role_name', 'scope_id', 'run_epoch', 'control_repo_id', 'state', 'assigned_by',
   'assignment_id', 'session_id', 'process_id', 'run_id', 'product_repo_id',
@@ -353,6 +357,25 @@ foreach ($relative in $requiredFiles) {
   }
 }
 
+$retentionStableFiles = @(
+  'scripts/yefeng/compact-run-evidence.ps1',
+  'scripts/yefeng/run-retention-policy.json',
+  'scripts/yefeng/test-run-evidence-retention.ps1',
+  'scripts/yefeng/install-governed-runner.ps1',
+  'scripts/yefeng/validate-run-evidence-retention.ps1'
+)
+$presentRetentionFiles = [System.Collections.Generic.List[string]]::new()
+foreach ($relative in $retentionStableFiles) {
+  $retentionPath = Join-Path $controlRootPath $relative
+  if (-not (Test-Path -LiteralPath $retentionPath)) { continue }
+  if (-not (Test-InternalPathSafety $retentionPath $controlRootPath $relative)) { continue }
+  if (-not (Test-Path -LiteralPath $retentionPath -PathType Leaf)) {
+    $issues.Add("Installed retention artifact is not an ordinary leaf: $relative")
+    continue
+  }
+  $presentRetentionFiles.Add($relative)
+}
+
 $gitTopLevel = Invoke-GitRead $controlRootPath @('rev-parse', '--show-toplevel')
 if ($gitTopLevel) {
   if (-not (Normalize-Path $gitTopLevel).Equals($controlRootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -469,6 +492,7 @@ foreach ($scopeId in $scopeIds) {
       $issues.Add("Invalid control state for ${scopeId}: $($_.Exception.Message)")
     }
   }
+  $outcomeLock = $null
   if ($controlState) {
     $controlStateByScope[$scopeId] = $controlState
     if ([int] $controlState.version -ne 2) { $issues.Add("Control state version must be 2 for $scopeId") }
@@ -484,6 +508,107 @@ foreach ($scopeId in $scopeIds) {
     }
     if ($controlState.startup_level -notin @('LEVEL_1_GOVERNANCE_BOOTSTRAP', 'LEVEL_2_SINGLE_THREAD_TOTAL_CONTROL', 'LEVEL_3_FULL_PARALLEL_YEFENG')) {
       $issues.Add("Invalid startup_level for $scopeId")
+    }
+    $controlStateProperties = @($controlState.PSObject.Properties | ForEach-Object { $_.Name })
+    $hasOutcomeLockSchema = $controlStateProperties -contains 'outcome_lock_schema_version'
+    $outcomeLockSchemaVersion = 0
+    if ($hasOutcomeLockSchema) {
+      if (
+        -not (Test-IsInteger $controlState.outcome_lock_schema_version) -or
+        [int64] $controlState.outcome_lock_schema_version -notin @(1, 2)
+      ) {
+        $issues.Add("Outcome-lock schema version must be 1 or 2 for $scopeId")
+      } else {
+        $outcomeLockSchemaVersion = [int] $controlState.outcome_lock_schema_version
+      }
+    }
+    $outcomeLock = $controlState.outcome_lock
+    if (-not $outcomeLock) {
+      if ($hasOutcomeLockSchema) {
+        $issues.Add("Outcome lock is required by the declared outcome-lock schema for $scopeId")
+      } elseif ($controlState.startup_level -ne 'LEVEL_1_GOVERNANCE_BOOTSTRAP') {
+        $issues.Add("Outcome lock is required before Level 2/3 implementation for $scopeId")
+      } else {
+        $warnings.Add("Legacy Level 1 control state has no outcome lock for $scopeId; synthesize it before implementation upgrade.")
+      }
+    } else {
+      $outcomeLockProperties = @($outcomeLock.PSObject.Properties | ForEach-Object { $_.Name })
+      if (-not $hasOutcomeLockSchema) {
+        $warnings.Add("Outcome lock has no schema marker for $scopeId; reconcile it before the next implementation dispatch.")
+        if ($outcomeLockProperties -contains 'capability_disposition') {
+          $outcomeLockSchemaVersion = 1
+        } elseif (
+          $outcomeLockProperties -contains 'existing_capability_inventory' -and
+          $outcomeLockProperties -contains 'reuse_adapt_new_defer'
+        ) {
+          $outcomeLockSchemaVersion = 2
+        }
+      }
+      $commonOutcomeFields = @(
+        'status', 'revision', 'user_objective', 'user_visible_proof', 'first_vertical_slice',
+        'mvp_scope', 'non_goals', 'approved_public_contract_families',
+        'allowed_invisible_prerequisite_depth', 'authorization_ceiling', 'auto_execution_boundary',
+        'ask_boundary', 'estimate_baseline', 'drift_thresholds', 'approved_by', 'approved_at'
+      )
+      $capabilityOutcomeFields = switch ($outcomeLockSchemaVersion) {
+        1 { @('capability_disposition') }
+        2 { @('existing_capability_inventory', 'reuse_adapt_new_defer') }
+        default { @('existing_capability_inventory', 'reuse_adapt_new_defer') }
+      }
+      foreach ($requiredOutcomeField in @($commonOutcomeFields + $capabilityOutcomeFields)) {
+        if ($outcomeLockProperties -notcontains $requiredOutcomeField) {
+          $issues.Add("Outcome lock is missing ${requiredOutcomeField} for $scopeId")
+        }
+      }
+      if ($outcomeLockSchemaVersion -eq 1) {
+        $warnings.Add("Outcome-lock schema v1 is legacy for $scopeId; reconcile capability inventory/disposition and numeric prerequisite depth into v2.")
+        if ($controlState.startup_level -ne 'LEVEL_1_GOVERNANCE_BOOTSTRAP') {
+          $issues.Add("Level 2/3 requires outcome-lock schema v2 for $scopeId")
+        }
+      }
+      if ([string] $outcomeLock.status -notin @('UNCONFIRMED', 'CONFIRMED')) {
+        $issues.Add("Outcome lock status is invalid for $scopeId")
+      }
+      $prerequisiteDepthIsValid = $false
+      if ($outcomeLockSchemaVersion -eq 1) {
+        $parsedLegacyDepth = 0
+        $prerequisiteDepthIsValid = (
+          [int]::TryParse([string] $outcomeLock.allowed_invisible_prerequisite_depth, [ref] $parsedLegacyDepth) -and
+          $parsedLegacyDepth -ge 0 -and $parsedLegacyDepth -le 16
+        )
+      } else {
+        $prerequisiteDepthIsValid = (
+          (Test-IsInteger $outcomeLock.allowed_invisible_prerequisite_depth) -and
+          [int64] $outcomeLock.allowed_invisible_prerequisite_depth -ge 0 -and
+          [int64] $outcomeLock.allowed_invisible_prerequisite_depth -le 16
+        )
+      }
+      if (-not $prerequisiteDepthIsValid) {
+        $issues.Add("Outcome lock invisible-prerequisite depth is invalid for $scopeId")
+      }
+      if ([string] $outcomeLock.status -eq 'CONFIRMED') {
+        $commonConfirmedFields = @(
+          'revision', 'user_objective', 'user_visible_proof', 'first_vertical_slice', 'mvp_scope',
+          'non_goals', 'approved_public_contract_families',
+          'authorization_ceiling', 'auto_execution_boundary', 'ask_boundary', 'estimate_baseline',
+          'drift_thresholds', 'approved_by', 'approved_at'
+        )
+        foreach ($confirmedField in @($commonConfirmedFields + $capabilityOutcomeFields)) {
+          $confirmedValue = [string] $outcomeLock.$confirmedField
+          if ([string]::IsNullOrWhiteSpace($confirmedValue) -or $confirmedValue -eq 'unconfirmed') {
+            $issues.Add("Confirmed outcome lock has no usable ${confirmedField} for $scopeId")
+          }
+        }
+        if (-not (Test-CanonicalDateTimeOffsetText $outcomeLock.approved_at)) {
+          $issues.Add("Confirmed outcome lock approved_at is not canonical for $scopeId")
+        }
+      }
+      if (
+        $controlState.startup_level -ne 'LEVEL_1_GOVERNANCE_BOOTSTRAP' -and
+        [string] $outcomeLock.status -ne 'CONFIRMED'
+      ) {
+        $issues.Add("Level 2/3 requires a CONFIRMED outcome lock for $scopeId")
+      }
     }
     $controlBaselineProperties = @()
     if ($controlState.product_baselines) { $controlBaselineProperties = @($controlState.product_baselines.PSObject.Properties) }
@@ -555,6 +680,30 @@ foreach ($scopeId in $scopeIds) {
           $issues.Add("Role identity/epoch mismatch for ${scopeId}: $roleId")
         }
         if ($allowedRoleStates -notcontains $roleState) { $issues.Add("Invalid role state for ${scopeId}: $roleId / $roleState") }
+        if (
+          $outcomeLock -and [string] $outcomeLock.status -eq 'CONFIRMED' -and
+          $roleEpoch -eq [int] $rolesState.run_epoch -and $roleState -ne 'PLANNED'
+        ) {
+          foreach ($requiredOutcomeRoleField in @(
+            'outcome_lock_revision', 'delivery_classification', 'user_visible_proof', 'immediate_product_consumer'
+          )) {
+            if ($rolePropertyNames -notcontains $requiredOutcomeRoleField) {
+              $issues.Add("Active role is missing ${requiredOutcomeRoleField} for ${scopeId}: $roleId")
+            }
+          }
+          if ([string] $role.outcome_lock_revision -ne [string] $outcomeLock.revision) {
+            $issues.Add("Active role outcome-lock revision mismatch for ${scopeId}: $roleId")
+          }
+          if ([string] $role.delivery_classification -notin $allowedDeliveryClassifications) {
+            $issues.Add("Active role delivery classification is invalid for ${scopeId}: $roleId")
+          }
+          if (
+            [string] $role.delivery_classification -eq 'ENABLEMENT_ONLY' -and
+            [string]::IsNullOrWhiteSpace([string] $role.immediate_product_consumer)
+          ) {
+            $issues.Add("Enablement-only role has no immediate product consumer for ${scopeId}: $roleId")
+          }
+        }
         $hasLease = -not [string]::IsNullOrWhiteSpace([string] $role.lease_expires_at)
         if ($roleEpoch -lt [int] $rolesState.run_epoch -and ($terminalRoleStates -notcontains $roleState -or $hasLease)) {
           $issues.Add("Stale role is active or leased for ${scopeId}: $roleId")
@@ -1299,6 +1448,7 @@ $result = [ordered]@{
   product_statuses = $productStatuses
   scopes = $scopeIds
   issues = @($issues)
+  warnings = @($warnings)
 }
 
 $result | ConvertTo-Json -Depth 20

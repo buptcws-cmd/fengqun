@@ -31,7 +31,7 @@ The validated envelope supports:
 - capacity-aware parallel transport;
 - terminal completion, polling, resume, and exact cleanup.
 
-Level 3 authority is delegated by the operator. Record `operator_permission_ceiling`; require the requested mode to be at or below it. Prefer `workspace-write` in a dedicated worktree with explicit relative paths and post-run diff review. Use `danger-full-access` only when explicitly delegated and technically necessary; it cannot claim an exact path allowlist.
+Level 3 authority is delegated by the operator. Record `operator_permission_ceiling`; require the requested mode to be at or below it. A write role remains classified as `workspace-write`, but in the current non-interactive desktop environment its CLI executor is unconfined. Require a backend-specific external-fence acknowledgement, a dedicated clean worktree, explicit relative paths, and terminal diff review. Reject a separate `danger-full-access` assignment mode because it cannot claim an exact path allowlist.
 
 ## Minimal MCP
 
@@ -52,8 +52,8 @@ claude -p --output-format stream-json --verbose \
 ```
 
 For an operator-authorized Claude write role, map `workspace-write` to
-`--permission-mode acceptEdits`; map explicitly delegated `danger-full-access` to
-`--permission-mode bypassPermissions`. Keep the empty strict MCP profile unless the assignment
+`--permission-mode bypassPermissions` so non-interactive edit and test commands do not stall on
+approval. Require the external-fence acknowledgement described above. Keep the empty strict MCP profile unless the assignment
 separately authorizes MCP capability. Record `claude_write_boundary_acknowledged=true` and reject
 any out-of-scope diff before review or integration.
 
@@ -87,7 +87,7 @@ Version 3 run and completion records bind:
 
 Resolve a usable CLI command by executing `--version`; do not trust a WindowsApps alias that cannot run.
 
-Codex launch uses `codex exec`; resume uses `codex exec resume` from the assigned worktree with an explicit `sandbox_mode="read-only"` override. Parse the `thread.started` event to obtain the session ID.
+Codex launch uses `codex exec`; resume uses `codex exec resume`. Read-only runs keep an explicit `sandbox_mode="read-only"` boundary. For an acknowledged write role, both launch and resume use `--dangerously-bypass-approvals-and-sandbox` because the desktop-managed runtime otherwise reports an effective read-only `turn_context`. Parse the `thread.started` event to obtain the session ID and retain the Yefeng worktree/path audit as the external boundary.
 
 Claude launch creates an explicit UUID and uses `--session-id`; resume uses `--resume <session-id>`. Normalize the terminal `result` event into the run's last-message file.
 
@@ -123,7 +123,7 @@ Every new run row should record these additive fields:
 
 These fields are additive. Readers must continue accepting old run rows, but retention treats a row missing any field as legacy-protected. Do not synthesize a binding from directory names.
 
-After a terminal batch is reviewed and its control disposition is committed, read `run-evidence-retention.md` and run `compact-run-evidence.ps1` in `DryRun` mode from a clean exact control Git top level. Apply only a separately preserved dry-run receipt after one unique matching `RUN_EVIDENCE_RETENTION_PREPARED` event is committed as the direct child of the planned control HEAD. The event binds epoch, policy, token digest, candidate summary, reference set, and the committed runs/roles/control/transport hashes. Process cleanup and log compaction are different operations: cleanup stops verified process trees; compaction removes only eligible full-output leaf files.
+In `external-git` mode, after a terminal batch is reviewed and its control disposition is committed, read `run-evidence-retention.md` and run `compact-run-evidence.ps1` in `DryRun` mode from a clean exact control Git top level. The bundled compactor rejects embedded topology; embedded runs remain retained until a separately reviewed embedded retention path exists. Apply only a separately preserved dry-run receipt after one unique matching `RUN_EVIDENCE_RETENTION_PREPARED` event is committed as the direct child of the planned control HEAD. The event binds epoch, policy, token digest, candidate summary, reference set, and the committed runs/roles/control/transport hashes. Process cleanup and log compaction are different operations: cleanup stops verified process trees; compaction removes only eligible full-output leaf files.
 
 ## PID-Safe Cleanup
 

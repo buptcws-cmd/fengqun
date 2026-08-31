@@ -36,13 +36,13 @@ Keep series context in three layers so completed history does not crowd active d
 - **Warm:** the current cycle contract, exact revisions, validation/review evidence, reproduction material, and task-specific handoff detail. Load it only for the active checkpoint.
 - **Cold:** closed cycles, superseded candidates, historical logs, old runtime/package identities, and completed registries. Store it in indexed archives, commits, PRs, or evidence manifests and load it only for audit or reopening.
 
-As a default budget, keep the active registry at or below 100 lines, no more than two or three active WIP rows, and at most one just-closed row waiting for archive. Local authority may override these values. Archive stable closed rows, superseded candidates, and completed investigation detail immediately instead of waiting for the registry to become large.
+As a default budget, keep the active registry at or below 100 lines, no more than two or three active WIP rows, and at most one just-closed row waiting for archive. For schema-v3 directory state, the enforced ceilings are `HOT.md <= 120` lines and `16384` bytes, `control.json <= 32768` bytes, at most three active candidate refs, and each active candidate state `<= 65536` bytes with at most five current validations and one current review. Local authority may lower these values. Archive stable closed rows, superseded candidates, and completed investigation detail immediately instead of waiting for the registry to become large.
 
 ## Incremental read protocol
 
 The host may require the applicable `SKILL.md` to be read in full on every new turn. Keep that entrypoint compact and obey the host. This protocol reduces every other repeated read:
 
-1. Start with actual system state, the machine control state, and the compact hot registry.
+1. Start with actual system state, `HOT.md`, and `control.json`. If the caller supplies a v3 pointer file, resolve only its exact `state_root` and `control.json`. Never recursively enumerate the state directory.
 2. Record `instruction_fingerprints` as SHA-256 values for authority/reference files after their latest full required read. If a fingerprint changes, reread that file completely before acting under it. A matching fingerprint permits reuse only within the same continuing context and never overrides a host rule requiring a fresh read.
 3. Record `event_cursors` for append-only events, messages, logs, and review queues. Read strictly after the accepted cursor, verify continuity, then advance the cursor only after the new facts are reconciled into current truth.
 4. Load warm material only for the next action: the active checkpoint contract, exact candidate diff, current evidence, and applicable action-specific reference.
@@ -86,14 +86,55 @@ paused | handed-off -> claimed            (explicit resume, new epoch)
 
 `done` is locally verified and reviewed. `merged` is integrated. `closed` also requires final evidence and execution-container cleanup.
 
-## Suggested machine state
+## Recommended schema-v3 directory state
 
-Keep dynamic control facts compact. Adapt field names to local conventions.
+Use this layout for a persistent or multi-cycle series:
+
+```text
+<state-root>/
+├── HOT.md
+├── control.json
+├── archive-index.md
+└── active/
+    └── <candidate-id>/
+        └── state.json
+
+<archive-root>/
+└── snapshots/<snapshot-id>/...
+```
+
+`control.json` contains current control identity, budgets, active claims, and exact `candidate_refs` only. Each ref is `{id, path: "active/<id>/state.json", sha256}`. It never embeds `candidates`, `closed_candidate_history`, old leases/roles, validation/review history, or completed claims. `archive-index.md` is a human pointer surface and is not loaded during reconciliation. Cold snapshots SHOULD include a lossless original bundle plus a SHA-256 manifest.
+
+Path bases are mandatory and unambiguous:
+
+- the legacy pointer's `state_root`, `control`, and `archive_manifest` resolve from the pointer file's parent;
+- `control.archive_root` resolves from the state root and must have the canonical shape `../<non-reparse child of the state-root parent>`;
+- `archive_snapshot.manifest`, `archive_snapshot.bundle`, `shelves_ref`, and active claim/candidate `archive_ref` resolve from the state root and declare `reference_base`, `shelves_ref_base`, or `archive_ref_base` as `state_root`;
+- fragments such as `#original-control-state.json` are removed only for filesystem reachability, then interpreted by the explicit cold audit;
+- state, candidate, pointer, and archive paths may not traverse a Windows junction, symlink, or other reparse point.
+
+The legacy filename may remain as a pointer no larger than 4096 bytes:
+
+```json
+{
+  "schema_version": 3,
+  "pointer_format": "series-directory-pointer-v3",
+  "state_root": "<sibling-state-directory>",
+  "control": "control.json"
+}
+```
+
+Use [`scripts/migrate-series-state-v3.ps1`](../scripts/migrate-series-state-v3.ps1) to migrate a verified v1/v2 monolith. It preflights root relationships and reparse points, hashes and bundles the original, publishes the archive snapshot, reconciles the staged state with `-AuditArchive`, atomically replaces the pointer, and reconciles again. A pre-pointer failure removes only exact transaction-created state; a post-pointer failure restores the verified prior bytes before cleanup. `-PointerPath` plus `-ExpectedPointerSha256` safely switches an existing v3 pointer when regenerating from an archived v1/v2 source. Never hand-trim or overwrite the original before its bundled hash is verified.
+
+## Legacy bounded single-file state
+
+Schema v1/v2 remains supported for bounded legacy input and short-lived single-file state. Keep dynamic control facts compact and migrate any persistent file that accumulates history.
 
 Keep only current in-scope candidates in `candidates`; move superseded or historical candidates to warm/cold evidence. Bind every candidate's worktree, branch, revision, validation, and review independently.
 
 ```json
 {
+  "schema_version": 2,
   "run_epoch": 4,
   "status": "active",
   "main_revision": "<git revision>",
@@ -102,6 +143,13 @@ Keep only current in-scope candidates in `candidates`; move superseded or histor
     "pending_reviews": 2,
     "integration_batches": 1
   },
+  "integration_intents": [
+    {
+      "id": "integration-4-a",
+      "status": "running",
+      "run_epoch": 4
+    }
+  ],
   "cycle_budget": {
     "candidate_attempt_limit": 2,
     "review_failure_limit": 2,
@@ -145,18 +193,31 @@ Keep only current in-scope candidates in `candidates`; move superseded or histor
           "interrupted": false
         }
       ],
-      "reviews": [
-        {
-          "reviewed_revision": "<same exact git revision>",
-          "status": "passed",
-          "verdict": "review passed"
-        }
-      ]
-    }
+       "reviews": [
+         {
+           "review_id": "final-review-candidate-a",
+           "reviewed_revision": "<same exact git revision>",
+           "status": "passed",
+           "verdict": "review passed"
+         }
+       ],
+       "review_gate": {
+         "review_id": "final-review-candidate-a",
+         "candidate_revision": "<same exact git revision>",
+         "binding": "exact",
+         "proof": {
+           "reviewed_revision": "<same exact git revision>"
+         }
+       }
+     }
   ],
   "cleanup_state": "pending"
 }
 ```
+
+`wip_budget` contains limits, never live counts. Do not persist `wip_usage`; the reconciler derives and returns it from current candidates, current review gates, and optional `integration_intents`. When `integration_intents` is absent, integration usage is `0`; do not infer it from `merged` candidates or cleanup debt. Count unique current-epoch intents only while status is `pending`, `running`, `committing`, or `reconciling`. Treat malformed or stale active intents as unknown plus a blocking issue.
+
+In schema v2, include `review_gate` on every hot/re-executable candidate (`claimed`, `implementation`, `running`, `validation`, `review`, `implementation-review`, `blocked`) and use `null` before a gate exists. Bind a non-null gate when review begins. A terminal/inactive historical candidate may omit the field and use the read-only last-exact fallback; it still needs an exact passed review for `done`, `merged`, or `closed`, cannot inherit administratively, and must gain an explicit v2 gate before reactivation. Historical review records need not be retrofitted with ids unless a gate references them. Keep only the referenced current review in hot state and move older records to warm/cold evidence.
 
 ## Transition checks
 
@@ -167,7 +228,7 @@ Before dispatch, resume, write, long validation, commit, review, merge, cleanup,
 - claim lease is live;
 - actual main revision and every candidate's revision match recorded identities;
 - each candidate's declared worktree/write surfaces agree with actual state;
-- WIP budget has capacity;
+- derived `wip_usage` is known and does not exceed the `wip_budget` ceilings;
 - required upstream gates are exact-revision evidence;
 - no source change invalidated validation or review;
 - cycle-budget counters do not require a design/root-cause reassessment;
@@ -182,28 +243,38 @@ Increment `run_epoch` on pause, handoff, cancellation, or takeover. Do not reuse
 From any worktree in the same Git repository, pass the absolute machine-state path explicitly:
 
 ```powershell
-pwsh -NoProfile -File scripts/reconcile-series-state.ps1 -StatePath <absolute-control-state.json>
+pwsh -NoProfile -File scripts/reconcile-series-state.ps1 -StatePath <absolute-state-directory-or-pointer.json>
 ```
 
-The script is read-only. It checks local `refs/heads/main`, each declared candidate worktree/branch/revision, exact-revision validation and review evidence, WIP budgets, claim epoch/lease state, and inactive/closed control states. It ignores Git worktrees that are not declared as current candidates, so unrelated work does not consume this series' WIP budget.
+To read and verify the declared cold manifest and ZIP entry hash as an explicit audit:
+
+```powershell
+pwsh -NoProfile -File scripts/reconcile-series-state.ps1 -StatePath <absolute-state-directory-or-pointer.json> -AuditArchive
+```
+
+The script is read-only. For v3 it resolves the exact directory/pointer, rejects reparse traversal, enforces path/hash/context budgets, stats exact declared cold targets, cross-binds pointer/control original identity, and materializes only named active candidate refs; default reconciliation never reads cold contents. `-AuditArchive` additionally reads the one declared manifest and ZIP original entry to verify the cold hash chain. It then checks local `refs/heads/main`, each declared candidate worktree/branch/revision, exact-revision validation, explicit review gates, derived WIP usage against budget ceilings, claim epoch/lease state, and inactive/closed control states. It ignores Git worktrees that are not declared as current candidates, so unrelated work does not consume this series' WIP budget.
 
 Exit `0` means reconciliation completed with no issues. Exit `2` means the JSON result contains schema, identity, evidence, lease, WIP, or lifecycle issues; block state-changing actions until they are reconciled. Omitting mandatory `-StatePath` is rejected by PowerShell before reconciliation. The script never edits state, renews claims, increments epochs, switches branches, fetches remotes, or cleans worktrees.
 
 ## Review and validation semantics
 
 - Treat interrupted, cancelled, timed-out, or incomplete validation as not passed.
-- Bind passed validation and review to exact candidate revisions.
+- Prefer schema v3 for persistent series and retain schema v2 only for bounded legacy/single-file state. Bind the current review explicitly as `candidate.review_gate = {review_id, candidate_revision, binding, proof}`. The referenced `review_id` must resolve to exactly one review record; old unreferenced records are history, not current evidence or WIP.
+- Use `binding: exact` unless the narrow administrative exception applies. Require `proof.reviewed_revision` to equal both the referenced review's revision and the candidate revision.
+- Permit `binding: administrative-descendant` only when all of these are true: the referenced record is an independent literal `review passed`; it carries `review_surface.path_semantics: whole-file-administrative` and an exact, non-glob `administrative_paths` list; the candidate is its direct single-parent child; and the complete Git changed-path set equals that reviewed list. Compute the scoped surface from the complete `git ls-tree -r -z --full-tree` records after excluding those exact administrative paths, require source and target SHA-256 digests to be identical and equal the proof values, and separately bind the exact raw Git diff SHA-256. The candidate gate must not supply or widen the administrative list.
+- Never classify a mixed-semantic file as wholly administrative merely because of its path, directory, extension, or an allowlist. A mixed file combines reviewed/product meaning with registry, evidence, status, or other administrative fields. It requires a fresh exact review. `repository-verifier` is a reserved extension point and the reconciler rejects it until a repository-owned executable contract can recompute field selectors and exact before/after values from Git; a hand-written receipt is not proof.
+- Treat an omitted `schema_version` as v1 migration input. V1 has no inheritance: select only the last review record whose `reviewed_revision` exactly equals the current candidate revision. Apply the same exact-only, read-only fallback to schema-v2 terminal/inactive historical candidates that lack `review_gate`; never apply it to hot candidates, and require a gate before reactivation. Do not report older passed reviews as revision mismatches, do not let them unlock a terminal state, and do not count their pending status as current WIP.
 - Record `pre-audit-ready` only when the contract and candidate direction are stable, focused checks pass, and known gaps are explicit. Use this early gate only when the checkpoint's risk or local authority requires a pre-audit.
 - Record `final-review-ready` only when the exact final candidate is frozen and every required post-repair validation/manual evidence item is complete.
-- Append review records in observation order. For a terminal candidate, the last review entry is authoritative and must itself be `review passed`; an earlier pass never overrides a later failure or incomplete review.
+- Append review records in observation order within warm evidence. In v2 the explicit gate is authoritative. In the v1 fallback, the last record for the exact current revision is authoritative; an earlier exact pass never overrides a later exact failure or incomplete review.
 - Accept only literal `review passed` or `review failed` as a formal verdict.
 - Keep advisory output without a verdict as `reviewing` or `incomplete`.
 - Default `candidate_attempt_limit` and `review_failure_limit` are both `2` for one root-cause direction. A local authority may lower them or deliberately raise them with a recorded reason.
-- Count a candidate attempt when a frozen candidate is rejected by required validation, product-path evidence, or formal review. Count a review failure only for a substantive literal `review failed`; a timeout or infrastructure interruption remains incomplete and does not consume the review-failure counter.
+- Count a candidate attempt when a frozen candidate is rejected by required validation, product-path evidence, or formal review for at least one `product`-class finding. Count a review failure only for a literal `review failed` whose blocking findings include at least one `product`-class defect. Reviewers should return `review passed` plus a required-corrections list when every blocking finding is `administrative` (registry, claim coverage, status vocabulary, evidence hygiene — production tree correct); if a reviewer nevertheless returns `review failed` with only administrative findings, the coordinator records the discrepancy, corrects in place, re-freezes the binding with tree-hash proof, and consumes neither counter. A timeout or infrastructure interruption remains incomplete and does not consume the review-failure counter.
 - Before repair, consolidate all available findings into one batch. A changed exact revision is a replacement candidate, not permission to send parallel equal-scope reviewers or repeat the same full evidence load.
 - When either limit is reached, mark the checkpoint `blocked` with `root-cause-reassessment-required`. Stop packaging, broad matrices, and new formal review. Write a narrowed causal hypothesis, rejected assumptions, smallest acceptance matrix, and changed direction; then explicitly reset counters before implementation resumes.
 - Record each explicit reset by incrementing `reset_count` and replacing `last_reset` with an object containing RFC3339 `at`, non-empty `reason`, `changed_direction`, `acceptance_matrix`, and `authorized_by`. With `reset_count: 0`, `last_reset` must be `null`. The reconciler rejects non-blocked active candidates or claims after either limit is reached, and rejects a reset without this evidence.
-- Track delivery efficiency with compact counts: merged checkpoints, product-path-closed checkpoints, candidate attempts, formal review rounds, full package/build rounds, and active-registry size. Token counts may be recorded when the host exposes them, but never invent them.
+- Track delivery efficiency with compact counts: merged checkpoints, product-path-closed checkpoints, candidate attempts, formal review rounds, full-gate runs plus runs inherited via tree-hash equality, infrastructure interruptions, administrative corrections, reviewer replacements, and active-registry size. Token counts may be recorded when the host exposes them, but never invent them. These counters are the raw material for cross-session workflow evaluation; record them at closeout rather than reconstructing them from logs later.
 
 ## Progress checkpoint
 

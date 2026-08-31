@@ -32,6 +32,13 @@ class SeriesContextEfficiencyContractTests(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, reference)
 
+    def test_yefeng_owns_its_control_loop_without_double_loading_this_skill(self) -> None:
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+
+        self.assertIn("standalone series coordinator", skill)
+        self.assertIn("do not load this skill in addition", skill)
+        self.assertNotIn("This skill remains authoritative", skill)
+
 
 if __name__ == "__main__":
     unittest.main()

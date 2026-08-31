@@ -22,6 +22,10 @@
       "product_worktree": null,
       "transport_mode": "control-spool",
       "current_checkpoint": "governance-bootstrap",
+      "outcome_lock_revision": "__OUTCOME_LOCK_REVISION__",
+      "delivery_classification": "SPEC_ONLY",
+      "user_visible_proof": "__USER_VISIBLE_PROOF__",
+      "immediate_product_consumer": "Outcome-lock confirmation before implementation.",
       "owned_scope": [
         "control governance only"
       ],

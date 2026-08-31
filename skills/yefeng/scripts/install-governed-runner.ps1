@@ -6,7 +6,9 @@ param(
   [string]$ExpectedCandidate = 'b282e83f746b6aa042e0e724166cb49c05da21e9',
   [switch]$InstallRetentionOnly,
   [Parameter(DontShow = $true)]
-  [switch]$TestFailStagingCleanup
+  [switch]$TestFailStagingCleanup,
+  [Parameter(DontShow = $true)]
+  [switch]$TestDestinationPreflightOnly
 )
 
 Set-StrictMode -Version Latest
@@ -57,6 +59,47 @@ function Assert-GitTopLevel([string]$Root) {
 
 function Get-LowerHash([string]$PathValue) {
   return (Get-FileHash -LiteralPath $PathValue -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Test-IsHardLinkedLeaf([string]$PathValue) {
+  if (-not (Test-Path -LiteralPath $PathValue -PathType Leaf)) { return $false }
+  $item = Get-Item -LiteralPath $PathValue -Force -ErrorAction Stop
+  $linkTypeProperty = $item.PSObject.Properties['LinkType']
+  if ($null -ne $linkTypeProperty -and [string]$linkTypeProperty.Value -ceq 'HardLink') {
+    return $true
+  }
+
+  # Windows PowerShell 5.1 and PowerShell 7 both expose LinkType for NTFS
+  # hardlinks. Confirm the underlying link count as a fail-closed fallback so
+  # an older or alternate filesystem provider cannot make a multi-link leaf
+  # look ordinary.
+  if ($env:OS -ceq 'Windows_NT') {
+    $systemDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::System)
+    $fsutilPath = Join-Path $systemDirectory 'fsutil.exe'
+    if (-not (Test-Path -LiteralPath $fsutilPath -PathType Leaf)) {
+      throw "Cannot establish runner destination hardlink count: $PathValue"
+    }
+    $hardlinkRows = @(& $fsutilPath hardlink list $PathValue 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+      throw "Cannot establish runner destination hardlink count: $PathValue"
+    }
+    return @($hardlinkRows | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }).Count -gt 1
+  }
+  return $false
+}
+
+function Assert-RunnerDestinationLeafSafe(
+  [string]$PathValue,
+  [string]$RelativePath,
+  [string]$Phase = ''
+) {
+  if (-not (Test-Path -LiteralPath $PathValue)) { return }
+  if (-not (Test-Path -LiteralPath $PathValue -PathType Leaf)) {
+    throw "Runner destination is not an ordinary leaf$Phase`: $RelativePath"
+  }
+  if (Test-IsHardLinkedLeaf $PathValue) {
+    throw "Runner destination is a hard link$Phase`: $RelativePath"
+  }
 }
 
 function Get-NormalizedManifestCarrierHash([string]$PathValue) {
@@ -153,10 +196,10 @@ $runnerManifest = [ordered]@{
 # Adding a sixth slot or moving a trusted hash outside the block must fail tests.
 # RETENTION_TRUST_MANIFEST_START
 $retentionManifest = [ordered]@{
-  'compact-run-evidence.ps1' = 'b3fe0a438bed444c2ba4bf38ed1459c86ec1efaf3de2fc7f2f2105289954b01b'
+  'compact-run-evidence.ps1' = 'a631e22c3dc92dab31c7c91b81cc8e1717997944d1765a89dec044d2483b59e3'
   'run-retention-policy.json' = '295df97cd07341663fe1716f310c372fccaaed7a553c560c2e364c91d93dcb4b'
-  'test-run-evidence-retention.ps1' = '05878f93394555a85baca1618d4ec652e2222bbd9fe05fe6bee31c0b3e2ee91f'
-  'install-governed-runner.ps1' = '6893bee6c2703671551880ac404b9ff36cbe66146e7346680b90cdfd7c6e8cd0'
+  'test-run-evidence-retention.ps1' = '455662d43e6e54c1f325b6e09a19f26f3d9d035f5b9604f85f09abce62e10ba0'
+  'install-governed-runner.ps1' = '899994d541185e8f4408db84784edf5b94635c2a3984cf9ebd083e5734e6cb90'
   'validate-run-evidence-retention.ps1' = 'a536cc130ff796a2b96e285cddf4763dd7245202519827afe2459d0df6440eef'
 }
 # RETENTION_TRUST_MANIFEST_END
@@ -178,6 +221,44 @@ foreach ($carrierName in @('install-governed-runner.ps1', 'validate-run-evidence
   Assert-RetentionManifestCarrierMatches ([string]$retentionSources[$carrierName]) $retentionManifest
 }
 
+$destinationScriptsRoot = Normalize-Path (Join-Path $destinationRoot 'scripts\yefeng')
+if (-not (Test-PathWithin $destinationScriptsRoot $destinationRoot)) { throw 'Destination scripts root escaped control repository.' }
+if (Find-ReparsePointInExistingPathChain $destinationScriptsRoot) { throw "Destination scripts root traverses a reparse point: $destinationScriptsRoot" }
+
+$runnerDestinationPlan = [System.Collections.Generic.List[object]]::new()
+if (-not $InstallRetentionOnly) {
+  # Resolve and reject every unsafe destination before source validation or
+  # the first destination write. In particular, an existing
+  # scripts/yefeng/lib junction must never redirect a trusted source write.
+  foreach ($entry in $runnerManifest.GetEnumerator()) {
+    $destinationPath = Normalize-Path (Join-Path $destinationRoot $entry.Key)
+    $destinationParent = Normalize-Path (Split-Path -Parent $destinationPath)
+    if (-not (Test-PathWithin $destinationPath $destinationScriptsRoot)) {
+      throw "Runner destination escaped scripts/yefeng: $($entry.Key)"
+    }
+    $destinationReparse = Find-ReparsePointInExistingPathChain $destinationPath
+    if ($destinationReparse) {
+      throw "Runner destination traverses a reparse point: $($entry.Key) / $destinationReparse"
+    }
+    Assert-RunnerDestinationLeafSafe $destinationPath ([string]$entry.Key)
+    $runnerDestinationPlan.Add([pscustomobject]@{
+      relative_path = [string] $entry.Key
+      expected_hash = [string] $entry.Value
+      destination_path = $destinationPath
+      destination_parent = $destinationParent
+    })
+  }
+}
+if ($TestDestinationPreflightOnly) {
+  if ($InstallRetentionOnly) { throw 'Destination preflight test mode applies only to the full runner install.' }
+  [ordered]@{
+    destination_preflight_passed = $true
+    destination_control_root = $destinationRoot
+    checked_runner_destinations = $runnerDestinationPlan.Count
+  } | ConvertTo-Json
+  return
+}
+
 $sourceRoot = ''
 if (-not $InstallRetentionOnly) {
   $sourceRoot = Normalize-Path $ValidatedSourceRoot
@@ -185,26 +266,49 @@ if (-not $InstallRetentionOnly) {
   & git -C $sourceRoot cat-file -e "$ExpectedCandidate^{commit}"
   if ($LASTEXITCODE -ne 0) { throw "Validated candidate does not exist: $ExpectedCandidate" }
   foreach ($entry in $runnerManifest.GetEnumerator()) {
-    $sourcePath = Join-Path $sourceRoot $entry.Key
+    $sourcePath = Normalize-Path (Join-Path $sourceRoot $entry.Key)
     if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw "Validated runner file is missing: $($entry.Key)" }
     if ((Get-LowerHash $sourcePath) -cne $entry.Value) { throw "Validated runner hash changed: $($entry.Key)" }
   }
 }
 
-$destinationScriptsRoot = Normalize-Path (Join-Path $destinationRoot 'scripts\yefeng')
-if (-not (Test-PathWithin $destinationScriptsRoot $destinationRoot)) { throw 'Destination scripts root escaped control repository.' }
-if (Find-ReparsePointInExistingPathChain $destinationScriptsRoot) { throw "Destination scripts root traverses a reparse point: $destinationScriptsRoot" }
 if (-not (Test-Path -LiteralPath $destinationScriptsRoot)) {
   New-Item -ItemType Directory -Path $destinationScriptsRoot -Force | Out-Null
 }
 
+$runnerInstallPlan = [System.Collections.Generic.List[object]]::new()
 if (-not $InstallRetentionOnly) {
-  foreach ($entry in $runnerManifest.GetEnumerator()) {
-    $sourcePath = Join-Path $sourceRoot $entry.Key
-    $destinationPath = Join-Path $destinationRoot $entry.Key
-    $destinationParent = Split-Path -Parent $destinationPath
-    if (-not (Test-Path -LiteralPath $destinationParent)) { New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null }
-    [System.IO.File]::Copy($sourcePath, $destinationPath, $true)
+  foreach ($plannedDestination in $runnerDestinationPlan) {
+    $runnerInstallPlan.Add([pscustomobject]@{
+      relative_path = $plannedDestination.relative_path
+      expected_hash = $plannedDestination.expected_hash
+      source_path = Normalize-Path (Join-Path $sourceRoot $plannedDestination.relative_path)
+      destination_path = $plannedDestination.destination_path
+      destination_parent = $plannedDestination.destination_parent
+    })
+  }
+  foreach ($plannedRunner in $runnerInstallPlan) {
+    if (-not (Test-Path -LiteralPath $plannedRunner.destination_parent)) {
+      New-Item -ItemType Directory -Path $plannedRunner.destination_parent -Force | Out-Null
+    }
+    $destinationReparse = Find-ReparsePointInExistingPathChain $plannedRunner.destination_path
+    if ($destinationReparse) {
+      throw "Runner destination traverses a reparse point: $($plannedRunner.relative_path) / $destinationReparse"
+    }
+    Assert-RunnerDestinationLeafSafe `
+      $plannedRunner.destination_path ([string]$plannedRunner.relative_path) ' after parent creation'
+  }
+  foreach ($plannedRunner in $runnerInstallPlan) {
+    $destinationReparse = Find-ReparsePointInExistingPathChain $plannedRunner.destination_path
+    if ($destinationReparse) {
+      throw "Runner destination traverses a reparse point before copy: $($plannedRunner.relative_path) / $destinationReparse"
+    }
+    Assert-RunnerDestinationLeafSafe `
+      $plannedRunner.destination_path ([string]$plannedRunner.relative_path) ' before copy'
+    [System.IO.File]::Copy($plannedRunner.source_path, $plannedRunner.destination_path, $true)
+    if ((Get-LowerHash $plannedRunner.destination_path) -cne $plannedRunner.expected_hash) {
+      throw "Installed runner hash mismatch: $($plannedRunner.relative_path)"
+    }
   }
 }
 

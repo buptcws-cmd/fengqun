@@ -415,6 +415,18 @@ $gitTopLevel = Normalize-Path (Invoke-GitText $controlRootPath @('rev-parse', '-
 if (-not $gitTopLevel.Equals($controlRootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
   throw "Control root is not an exact Git top level: $gitTopLevel"
 }
+$topologyPath = Normalize-Path (Join-Path $controlRootPath '.yefeng\control-plane.json')
+if (Find-ReparsePointInExistingPathChain $topologyPath) { throw "Control topology traverses a reparse point: $topologyPath" }
+if (-not (Test-Path -LiteralPath $topologyPath -PathType Leaf)) {
+  throw 'Run-evidence compaction supports only an external-git control repository with .yefeng/control-plane.json.'
+}
+$topology = ConvertFrom-RetentionJson (Get-Content -LiteralPath $topologyPath -Raw -Encoding UTF8)
+if ([string] $topology.control_plane_mode -cne 'external-git') {
+  throw 'Run-evidence compaction supports only control_plane_mode external-git.'
+}
+if (@($topology.active_scopes) -notcontains $ScopeId) {
+  throw "Scope is not active in the external control topology: $ScopeId"
+}
 $controlStatus = Invoke-GitText $controlRootPath @('status', '--porcelain=v1', '--untracked-files=all')
 if (-not [string]::IsNullOrWhiteSpace($controlStatus)) { throw "Control repository must be clean: $controlStatus" }
 $currentControlHead = Invoke-GitText $controlRootPath @('rev-parse', '--verify', 'HEAD^{commit}')

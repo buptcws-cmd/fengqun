@@ -3,6 +3,9 @@
 - This repository is the execution/governance control plane, not the product repository.
 - Product truth lives in the product repository named by `.yefeng/control-plane.json`.
 - Read actual Git/filesystem/process state before trusting control state or Markdown views.
+- Read the current Outcome Lock before dispatch, resume, integration, or estimate changes. `UNCONFIRMED` permits Level 1 governance only; Level 2/3 implementation requires `CONFIRMED` user-visible proof, first vertical slice, MVP/non-goals, reuse disposition, authorization ceiling, estimate baseline, drift thresholds, and approval provenance.
+- Treat default approval as execution authority inside the Outcome Lock, not authority to redefine product intent. Drain safe in-lock work without repeated approval; batch genuine product/scope decisions once.
+- Freeze only the affected scope when its drift breaker trips. Continue independent in-lock work, and never let a technically executable prerequisite or public capability bypass the lock.
 - Only the active total-control writer may modify tracked shared state.
 - Use `scripts/yefeng/enter-control-write.ps1` to acquire the repository-wide commit fence before a tracked write and `scripts/yefeng/exit-control-write.ps1` after exactly one coherent control commit.
 - The only zero-change release is the first bootstrap HEAD binding automatically marked by `bootstrap_head_binding`; every ordinary lock publishes exactly one direct-child commit.
@@ -16,4 +19,5 @@
 - Stage explicit file allowlists. Never absorb unknown dirty files from another process.
 - Pause, handoff, cancellation, takeover, and unarchive create a new epoch before further execution.
 - Do not store secrets, credentials, unredacted sensitive command lines, or full private transcripts.
+- Classify checkpoints as `PRODUCT_PATH_CLOSED`, `PRODUCT_PATH_ADVANCED`, `ENABLEMENT_ONLY`, `SPEC_ONLY`, or `TEST_ONLY`; never report internal artifacts as user-visible closure. Do not invent P50/P80, confidence bands, or completion percentages unless this project's policy defines them.
 - Remote creation, push, publication, real credentials, and destructive cleanup outside recorded roots require applicable user authority.

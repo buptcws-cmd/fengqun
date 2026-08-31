@@ -289,8 +289,22 @@ Prefer the bundled `scripts/init-external-control-repo.ps1`, which transactional
 & <skill-root>\scripts\init-external-control-repo.ps1 `
   -ControlRoot <control-root> -ProductRoot <product-root> `
   -ProjectName <name> -ProjectId <id> -ScopeId <scope-id> `
+  -OutcomeLockStatus CONFIRMED `
+  -OutcomeLockRevision <revision> `
+  -UserObjective <objective> `
+  -UserVisibleProof <real-product-proof> `
+  -FirstVerticalSlice <first-slice> `
+  -MvpScope <mvp> -NonGoals <non-goals> `
+  -ExistingCapabilityInventory <existing-capabilities> `
+  -ReuseAdaptNewDefer <reuse-adapt-new-defer> `
+  -ApprovedPublicContractFamilies <contract-families> `
+  -AuthorizationCeiling <operator-ceiling> `
+  -EstimateBaseline <baseline> -DriftThresholds <thresholds> `
+  -OutcomeApprovedBy <user-or-authority> -OutcomeApprovedAt <canonical-DateTimeOffset-o> `
   -BindProductGitConfig
 ```
+
+The outcome parameters are optional only so Level 1 can bootstrap before product decisions finish; omitted values render as `unconfirmed` and block implementation upgrade until replaced by a user-confirmed outcome lock. Default approval still covers only execution inside that lock.
 
 At `LEVEL_1_GOVERNANCE_BOOTSTRAP`:
 
@@ -299,7 +313,7 @@ At `LEVEL_1_GOVERNANCE_BOOTSTRAP`:
 3. create the tracked topology, authorization, total-control, status, module, shared, archive, and machine-state skeletons;
 4. create ignored local root mapping and runtime transport directories, including the per-scope broker root;
 5. read product Git status and exact baseline without modifying product files;
-6. create scopes with roles in `PLANNED`, `run_epoch=1`, and no active claims;
+6. create scopes with roles in `PLANNED`, `run_epoch=1`, no active claims, and a confirmed outcome lock or explicit `unconfirmed` implementation gate;
 7. validate JSON, path containment, ignore rules, Git tracking, product/control identity, and startup level;
 8. commit the control bootstrap atomically;
 9. optionally add a reviewed stable pointer to the product repository through its normal Git workflow;

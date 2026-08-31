@@ -4,6 +4,8 @@ Use these templates only when the project lacks equivalent local docs. 野蜂 do
 
 For new-project startup levels, intake, level decisions, role-pool proposals, first-slice contracts, and upgrade checklists, use `startup.md` before using the full launch/resume patterns below.
 
+Before filling authorization, total-control, proposal, review, or handoff artifacts, read `outcome-and-scope-control.md`. Copy its compact fields; do not copy incident history or turn every rule into a second narrative document.
+
 The recorded startup level is a hard upper bound. The authorization matrix grants authority only for operations already permitted by that level. At Level 1, roles remain `PLANNED`; role assignment/launch, implementation worktrees, heartbeat creation, and product or role merges remain forbidden until a reviewed level transition is recorded.
 
 For `external-git`, read `external-control-repo.md` first. Treat the templates below as embedded defaults unless they explicitly include `control_root` and `product_root`. Resolve governance paths under `control_root`, product paths under the named product repository/worktree, and run logs under the control root.
@@ -60,12 +62,19 @@ Namespace roles, runs, events, messages, and runtime transport by `scope_id`. Th
 - 角色可以部署 subagent，但 subagent 不拥有顶层角色。
 - 合并按最小可验证集成点进行。
 - 总控线程是唯一可以唤醒、恢复、停止、替换顶层角色的线程。
+- 默认批准只扩大范围内执行自主性，不扩大产品目标、MVP、非目标或公共能力边界。
 
 ## 3. 推进取向
 
 - 当前取向：
 - 选择理由：
 - 明确非目标：
+- outcome_lock_revision：
+- 用户可见验收证明：
+- 首个纵向切片：
+- reuse / adapt / new / defer：
+- 估时基线与偏移阈值：
+- 默认自动执行范围 / 必须批量询问的边界：
 
 ## 4. 权威文件
 
@@ -92,7 +101,9 @@ Namespace roles, runs, events, messages, and runtime transport by `scope_id`. Th
 
 最小可验证集成点定义：
 
-- 有边界清晰的产物；
+- 有边界清晰、绑定 outcome-lock revision 的产物；
+- 已标注 PRODUCT_PATH_CLOSED / PRODUCT_PATH_ADVANCED / ENABLEMENT_ONLY / SPEC_ONLY / TEST_ONLY；
+- ENABLEMENT_ONLY 已绑定立即消费它的产品切片；
 - 有验证证据；
 - 需要 reviewer 时已有最小审查结论；
 - 已写交接报告或结果摘要；
@@ -100,13 +111,13 @@ Namespace roles, runs, events, messages, and runtime transport by `scope_id`. Th
 
 ## 7. 执行性总控轮次
 
-总控轮次默认是执行轮次。用户或自动化提示中出现“检查”“巡检”“心跳”“继续”“恢复”时，含义是先检查状态，再执行当前已授权且未阻塞的控制动作。
+总控轮次默认是执行轮次。用户或自动化提示中出现“检查”“巡检”“心跳”“继续”“恢复”时，含义是先检查状态，再执行当前启动档位、outcome lock 和授权策略共同允许且未阻塞的控制动作。
 
 只有当提示明确写了 `read-only`、`dry-run`、`no launch`、`do not start/resume/merge`，或授权/证据/并行度/冲突确实阻塞时，才只读汇报。
 
 `docs/总控状态快照.md` 中的“下一步待执行队列”不是建议列表。一次总控轮次是排空循环，不是单动作 tick。每次处理完成 run、导入 outbox、裁决阻塞、恢复、启动、合并、刷新基线或提交稳定治理事实后，都必须重新读取权威状态并继续执行下一项已授权、未阻塞、容量允许的动作，直到进入真正空闲。
 
-若没有更高优先级的 run 处理、outbox 路由、阻塞裁决、恢复或合并工作消耗当前循环，总控必须执行队列中所有当前安全且容量允许的动作，而不是只执行第一项后等待下一次心跳；如果不能执行，必须写清 `blocked_by`、`resume_when`、`required_evidence` 和 `wake_target`。
+若没有更高优先级的 run 处理、outbox 路由、阻塞裁决、恢复或合并工作消耗当前循环，总控必须执行队列中所有当前安全、位于 outcome lock 内且容量允许的动作，而不是只执行第一项后等待下一次心跳；如果不能执行，必须写清 `blocked_by`、`resume_when`、`required_evidence` 和 `wake_target`。技术上可做但超出 outcome lock 的项目不是待排空工作；触发偏移熔断并提交一次批量决策。
 
 总控心跳是长期保活机制。心跳间隔只是唤醒间隔，不是工作批次边界；20 分钟等待应该发生在排空所有能做的事之后。没有运行角色、没有待执行队列、当前 checkpoint 全部完成，只能得到 `IDLE_OK`，不能因此删除、暂停或关闭心跳。只有用户明确要求停止/暂停/删除/归档/结束野蜂总控循环，或经用户批准的授权策略要求停机时，才可停止心跳。空跑时报告已检查的事实和下一次唤醒条件，并保持现有 cadence。
 
@@ -136,6 +147,8 @@ safe_same_role_work_available:
 
 本文件记录野蜂工作中的自动化授权。总控线程、角色线程、worker subagent 和 reviewer subagent 都必须按本文件行动。
 
+默认批准的目的，是让总控在已确认的 outcome lock 内自动排空安全工作并减少重复审批。它是执行授权，不是重新定义产品目标、MVP、非目标、公共能力族或估时基线的授权。权限可向下委派但不得超过操作者上限；产品意图不能靠权限继承。
+
 ## 2. 授权类别
 
 | 类别 | 含义 |
@@ -152,16 +165,21 @@ safe_same_role_work_available:
 
 | 操作 | 授权 | 自动范围 | 需要证据 | 越界处理 |
 | --- | --- | --- | --- | --- |
+| 范围内常规实现/测试/审查/提交 | AUTO | 当前 outcome-lock revision、声明路径、风险与估时容差内 | candidate revision + 验证/审查 | 批量 ASK |
+| 可逆内部设计选择 | AUTO | 不新增公共能力族、持久数据义务、外部依赖或重大风险边界 | 决策摘要 + consumer | 批量 ASK |
+| 修改目标/MVP/非目标/用户可见证明 | ASK | 无 | scope delta + 复用优先方案 + 工期影响 | 未批准则 FORBID |
+| 新增 outcome lock 外公共能力族/重大架构 owner | ASK | 无 | existing capability inventory + 最小方案 + consumer | 未批准则 FORBID |
+| 显著调整估时基线 | ASK | 超过记录阈值 | 前后基线 + 证据 + 剩余产品路径 | 保留旧基线并触发熔断 |
 | 总控分配角色 | AUTO | 仅 LEVEL_3；docs/角色分配.md; .yefeng/state/roles.json | assignment_id + 事件 | ASK |
 | 启动/恢复 Codex 角色会话 | AUTO | 仅 LEVEL_3；已分配角色；max_parallel 内 | run_id + session_id/日志 | ASK |
 | 停止/替换失效角色会话 | SCOPED | 仅 LEVEL_3；EXPIRED/FAILED 或总控明确暂停 | 原 run 记录 | ASK |
 | 创建角色 worktree/branch | SCOPED | 仅 LEVEL_3；worktrees/<role_id>; codex/yefeng/<role_id>/** | git 输出 + 状态记录 | ASK |
-| 修改角色分配表 | SCOPED | 总控线程；角色仅能写本角色状态反馈字段 | 事件 + diff | ASK |
+| 修改角色分配表 | SCOPED | 仅总控线程；角色通过 assignment-bound outbox 发布反馈，由总控验证后写 tracked 状态 | 事件 + diff + receipt | ASK |
 | 写通信事件 | AUTO | 总控写 tracked `.yefeng/events.jsonl`/`.yefeng/messages/**；Level 3 broker 仅写 ignored `.yefeng/broker/<scope>/**` | message_id | ASK |
 | 发布/导入角色消息 | AUTO | 角色仅发布 assignment-bound outbox；broker 校验并写 runtime journal；总控提升到 tracked 共享事件流 | message_id + source digest + broker sequence | ASK |
-| 更新通信 Markdown 视图 | AUTO | docs/角色通信/** | 对应 message_id | ASK |
-| 写交接报告 | AUTO | docs/交接报告/** | 报告文件 | ASK |
-| 写总控指令 | SCOPED | 总控线程创建/关闭；目标角色只写反馈字段 | directive_id | ASK |
+| 更新通信 Markdown 视图 | AUTO | 仅总控线程写 tracked docs/角色通信/**；角色只写 assignment-bound transport | 对应 message_id + receipt | ASK |
+| 写交接报告 | AUTO | 角色写 assignment-bound runtime handoff/outbox；仅总控可提升为 tracked docs/交接报告/** | 报告 digest + receipt | ASK |
+| 写总控指令 | SCOPED | 仅总控线程创建/关闭；目标角色通过 assignment-bound outbox 发布 ACK/反馈 | directive_id + receipt | ASK |
 | 部署 worker subagent | AUTO | 本角色任务范围 | 子任务说明 | ASK |
 | 部署 reviewer subagent | AUTO | 本角色审查门槛 | 最小审查结论 | ASK |
 | proposal 审核 | AGENT_REVIEW | 对应角色提案 | reviewer 结论 | 不通过则修复重审 |
@@ -191,16 +209,20 @@ try { chcp.com 65001 > $null } catch {}
 ```
 
 - 若 JSONL、stdout 或 stderr 中出现中文文件名乱码，不要用乱码路径当作权威事实；先按 manifest/prompt 中的显式路径读取，并修正脚本编码后重跑小探针。
-- 默认记录 sandbox mode。Windows 上总控启动第一批实现角色前应先运行一次 sandbox probe：用 `workspace-write` 启动极小 `codex exec`，要求打印当前目录；若出现 `CreateProcessAsUserW failed: 5`，把 `workspace-write-shell=false` 写入状态快照或 runs 状态。之后需要 shell 的实现角色在独立 worktree 内使用 `-s danger-full-access`，但不得使用 approval bypass。
+- 默认记录 assignment sandbox mode 和实际 executor permission mode。Windows 上总控启动第一批实现角色前应运行最小 Codex probe，并读取持久化会话的有效 `turn_context`，不能只相信命令行参数。若普通 `workspace-write` 仍解析为 read-only，则仅在 operator 已授权写入、assignment 明确确认外部围栏、worktree 干净独立且声明路径可终态审计时，使用 `--dangerously-bypass-approvals-and-sandbox`；不要伪装成受 OS 精确路径隔离，也不要另行声明 `danger-full-access` assignment。
 - `.yefeng/runs/`、`.yefeng/assignment.json`、`.yefeng/outbox/`、`.yefeng/broker/` 默认是本地运行/运输材料，建议加入 `.gitignore`；长期事实写入状态 JSON、事件 JSONL、通信视图和交接摘要。
 
 ## 4. 用户介入条件
 
+- 改变 outcome lock 中的目标、用户可见证明、MVP、非目标或公共能力族；
+- 触发范围/估时熔断且不能在现有 lock 内收窄；
 - 扩大授权策略；
 - 使用真实密钥、外部账号、付费服务、发布或云写入；
 - 删除或覆盖非本任务创建的文件；
 - reviewer 不通过但角色想继续；
 - 总控、授权策略、登记表和指令无法裁决的冲突。
+
+把同一产品决策涉及的证据、选项、推荐和范围/工期差异合并为一次询问。用户确认并更新 outcome_lock_revision 后，不要对未变化的范围内动作重复索权。
 
 ## 5. 模型/推理档位
 
@@ -256,7 +278,7 @@ try { chcp.com 65001 > $null } catch {}
 
 1. 只有总控线程可把角色从 `PLANNED` 改为 `ASSIGNED`。
 2. 只有总控线程可启动或恢复顶层角色会话。
-3. 角色线程只能更新本角色进度、阻塞、证据和交接字段。
+3. 角色线程只能通过 assignment-bound outbox 发布本角色进度、阻塞、证据和交接；总控验证后更新 tracked 字段。
 4. 角色线程不能唤醒其他角色，只能写消息。
 5. 租约过期或进程死亡后，总控线程把角色标为 `EXPIRED` 并分配新会话。
 ```
@@ -285,6 +307,10 @@ try { chcp.com 65001 > $null } catch {}
       "owned_scope": ["docs/系列提案-数据与存储.md", "worktrees/COORD-D"],
       "forbidden_scope": ["其他角色 worktree", "未授权总控文件"],
       "current_checkpoint": "D0",
+      "outcome_lock_revision": "outcome-v1",
+      "delivery_classification": "ENABLEMENT_ONLY",
+      "user_visible_proof": "<locked user-visible proof>",
+      "immediate_product_consumer": "<exact next product slice>",
       "blocked_by": "",
       "resume_when": "",
       "required_evidence": "",
@@ -316,6 +342,9 @@ try { chcp.com 65001 > $null } catch {}
       "parent_run_id": null,
       "review_gate": "PENDING",
       "control_disposition": "ACTIVE",
+      "outcome_lock_revision": "outcome-v1",
+      "delivery_classification": "ENABLEMENT_ONLY",
+      "immediate_product_consumer": "<exact next product slice>",
       "session_id": "",
       "process_id": null,
       "command": "codex exec ...",
@@ -348,6 +377,10 @@ Per-run assignment manifest for every new assignment, stored at `.yefeng/runs/<r
   "role_id": "COORD-D",
   "role_name": "数据与存储",
   "checkpoint": "D0",
+  "outcome_lock_revision": "outcome-v1",
+  "delivery_classification": "ENABLEMENT_ONLY",
+  "user_visible_proof": "<locked user-visible proof>",
+  "immediate_product_consumer": "<exact next product slice>",
   "assigned_by": "INTEGRATOR",
   "control_root": "D:/project",
   "product_repo_id": "project",
@@ -355,15 +388,16 @@ Per-run assignment manifest for every new assignment, stored at `.yefeng/runs/<r
   "product_baseline_commit": "<exact-sha>",
   "worktree": "D:/project-worktrees/COORD-D",
   "branch": "codex/yefeng/COORD-D/D0",
-  "owned_scope": ["src/data/**", "docs/交接报告/**", ".yefeng/outbox/**"],
-  "forbidden_scope": ["docs/角色分配.md", ".yefeng/state/**", "其他角色 worktree"],
-  "outbox_dir": ".yefeng/outbox",
-  "inbox_dir": "D:/project/.yefeng/broker/default/inbox/COORD-D",
-  "handoff_dir": "docs/交接报告",
+  "owned_scope": ["src/data/**", "<assignment-bound-runtime-transport>/**"],
+  "forbidden_scope": ["tracked control state/views", "其他角色 worktree", "其他 assignment transport"],
+  "outbox_dir": "<assignment-bound-outbox>",
+  "inbox_dir": "<assignment-bound-inbox>",
+  "handoff_dir": "<assignment-bound-runtime-handoff>",
   "operator_permission_ceiling": "workspace-write",
   "sandbox_mode": "workspace-write",
   "allowed_write_roots": ["D:/project-worktrees/COORD-D"],
-  "allowed_paths": ["src/data/**", "docs/交接报告/**", ".yefeng/outbox/**"],
+  "allowed_paths": ["src/data/**", "<assignment-bound-runtime-transport>/**"],
+  "codex_write_boundary_acknowledged": true,
   "claude_write_boundary_acknowledged": true,
   "created_at": "YYYY-MM-DDTHH:mm:ssZ"
 }
@@ -490,8 +524,8 @@ broker 接受回执只证明运行时运输持久化，不是治理授权。总�
 
 ## 3. 当前任务
 
-| ID | checkpoint | 类型 | 状态 | assigned_role | worktree/branch | 写入范围 | 禁止范围 | 前置依赖 | 影响契约 | 预期产物 | 验证方式 | reviewer 结论 | 阻塞/消息 | 交接说明 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ID | outcome_lock_revision | checkpoint | 交付分类 | 状态 | assigned_role | worktree/branch | 写入范围 | 禁止范围 | 前置依赖/立即 consumer | 影响契约 | 预期用户证明 | 验证方式 | reviewer 结论 | 阻塞/消息 | 交接说明 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ```
 
 ## Control Directive Board Skeleton
@@ -550,10 +584,18 @@ assignment_id：
 session_id：
 run_id：
 checkpoint：
+outcome_lock_revision：
+worktree / branch：
+candidate_revision：
+claim / lease / run_epoch：
+message_event_id / accepted_cursor：
 生成时间：
 
 ## 1. 已完成修改
 
+- 交付分类：PRODUCT_PATH_CLOSED / PRODUCT_PATH_ADVANCED / ENABLEMENT_ONLY / SPEC_ONLY / TEST_ONLY
+- 对用户可见证明的推进：
+- ENABLEMENT_ONLY 的立即 consumer（如适用）：
 - 修改文件：
 - 涉及章节：
 - 新增或调整内容：
@@ -567,6 +609,9 @@ checkpoint：
 ## 3. Reviewer 结论
 
 - reviewer：
+- outcome-lock revision / candidate revision：
+- scope_alignment：
+- smallest_path_and_reuse：
 - 范围：
 - 结论：
 - 返工项：
@@ -602,6 +647,18 @@ safe_same_role_work_available：
 - 状态变化：
 - 必须登记的稳定事实：
 - 可删除的临时细节：
+
+## 8. 机器对账与 ACK
+
+- owner / unclaimed：
+- control/product revision：
+- claim / lease / epoch：
+- event/message receipt 与 cursor：
+- 保留 / defer / salvage / remove-after-review 分类：
+- recipient ACK / pending ACK：
+- reconciliation command 与结果：
+- merge/integration state：
+- 下一安全 actor/action：
 ```
 
 ## Assigned Role Prompt Pattern
@@ -631,6 +688,10 @@ Use this for a top-level role session launched by the total-control thread.
 - worktree: <worktree>
 - branch: <branch>
 - checkpoint: <checkpoint>
+- outcome_lock_revision: <revision>
+- delivery_classification: <classification>
+- user_visible_proof: <proof>
+- immediate_product_consumer: <consumer-or-not-applicable>
 
 你不能分配自己或其他顶层角色，不能唤醒/恢复其他角色，不能接第二个顶层角色。Level 3 control-spool 跨角色沟通必须通过 `scripts/yefeng/publish-role-message.ps1` 写入 assignment manifest 指定的 outbox，并用 `receive-role-message.ps1` 和自己保存的 broker sequence cursor 读取 inbox；不能直接写 broker journal/inbox/receipt。若 external control root 不可写，使用已记录的 worktree-local outbox，不得退化为隐藏聊天状态或自行扩大 sandbox。
 
@@ -658,6 +719,8 @@ Use this for a top-level role session launched by the total-control thread.
 
 任务：
 <specific assignment>
+
+先判断任务是否仍在 outcome lock 内，并优先复用/适配已登记能力。不得因为技术依赖图存在，就自行新增产品目标、公共能力族或第二层不可见前置。发现越界或偏移熔断时，发布一条包含证据、最小方案和范围/工期差异的 BLOCKER；不要逐文件向用户索权，也不要继续扩大实现。
 
 你可以按授权策略部署 worker/reviewer subagent。subagent 只属于你的角色，不拥有顶层角色。
 
@@ -703,7 +766,17 @@ safe_same_role_work_available:
 审查范围：
 <scope>
 
+先读取并绑定：
+- outcome_lock_revision: <revision>
+- candidate_revision: <exact-revision>
+- user_visible_proof: <proof>
+- first_vertical_slice: <slice>
+
 检查：
+- 是否仍产生约定的用户可见证明；
+- 是否是复用现有能力后的最小可信路径；
+- 是否新增了未批准目标、前置层、公共契约族或工期义务；
+- 交付分类是否与真实产品路径证据一致；
 - 是否符合授权策略和写入范围；
 - 是否满足 checkpoint 目标；
 - 是否有未登记跨角色契约变化；
@@ -712,8 +785,14 @@ safe_same_role_work_available:
 
 输出最小审查结论：
 - reviewer:
+- outcome_lock_revision:
+- candidate_revision:
+- scope_alignment: pass / fail
+- smallest_path_and_reuse: pass / fail
+- delivery_classification:
+- implementation_quality: pass / fail / not_reviewed
 - scope:
-- verdict: pass / fail / needs_changes
+- verdict: review passed / review failed
 - required_fixes:
 - re_review_needed:
 - unlock_or_block_effect:
@@ -728,22 +807,32 @@ Only use this launch pattern after the project has recorded `LEVEL_3_FULL_PARALL
 
 先解析并验证 `control_plane_mode`、`control_repo_id/control_root`、`scope_id/run_epoch`、产品 repo 映射和精确 baseline。external-git 下从控制仓读取治理状态，使用显式 `git -C` 操作产品仓；不得从当前目录或兄弟目录猜测根。
 
+从 topology 解析并记录精确治理路径，不得同时写两套默认路径：embedded 使用 `<control_root>/.yefeng/state/{roles,runs}.json` 及其项目本地人类视图；external-git 使用 `<control_root>/.yefeng/series/<scope_id>/state/{roles,runs}.json`、`<control_root>/docs/modules/<scope_id>/registry.md` 和 `<control_root>/docs/status.md`。若项目记录了其他等价路径，以记录值为准；路径缺失或歧义时停止，不猜测。
+
 这是 LEVEL_3 执行轮次，不是只读计划。只有已记录启动档位允许、且操作已授权、未阻塞、容量允许时，才把角色分配并启动起来；不要让通用授权越过档位门槛。
 
 目标：
 <user goal>
 
+outcome_lock_revision：<revision>
+用户可见验收证明：<proof>
+首个纵向切片：<slice>
+MVP / 非目标：<scope>
+reuse / adapt / new / defer：<inventory>
+估时基线 / 偏移阈值：<baseline-and-thresholds>
+
 请执行总控职责：
-1. 选择下一批可并行角色，数量不超过 <max_parallel>；
-2. 为实现型角色创建独立 worktree/branch；
-3. 写入 docs/角色分配.md 和 .yefeng/state/roles.json；
-4. 为每个角色生成包含精确 outbox_dir/inbox_dir 的 assignment.json 和 assigned role prompt；
-5. external-git control-spool 下先启动并验证当前 scope 的唯一 broker，再用 codex exec 启动后台角色会话；不要传 `-a/--ask-for-approval`；
-6. 从 JSONL 的 `thread.started.thread_id` 解析 session_id；
-7. 记录 run/session/process/log/last-message/prompt/assignment/sandbox；
-8. 写 ROLE_ASSIGNED / ROLE_STARTED 事件；
-9. 刷新 docs/总控状态快照.md，把未执行动作只保留在仍被阻塞或容量不足的队列中；
-10. 给用户报告实际启动了什么、等待什么、仍阻塞什么。
+1. 先核对任务是否位于当前 outcome lock；技术上可执行但越界的工作不得派发；
+2. 选择下一批可并行角色，数量不超过 <max_parallel>；
+3. 为实现型角色创建独立 worktree/branch；
+4. 写入已解析的 `<roles_state_path>` 和 `<role_registry_or_human_view_path>`；
+5. 为每个角色生成包含 outcome_lock_revision、交付分类、立即 consumer 和精确 outbox_dir/inbox_dir 的 assignment.json 与 assigned role prompt；
+6. external-git control-spool 下先启动并验证当前 scope 的唯一 broker，再用 codex exec 启动后台角色会话；不要传 `-a/--ask-for-approval`；
+7. 从 JSONL 的 `thread.started.thread_id` 解析 session_id；
+8. 记录 run/session/process/log/last-message/prompt/assignment/sandbox；
+9. 写 ROLE_ASSIGNED / ROLE_STARTED 事件；
+10. 刷新已解析的 `<status_snapshot_path>`，把未执行动作只保留在仍被阻塞、越界待决或容量不足的队列中；
+11. 给用户报告实际启动了什么、对应的用户路径推进、等待什么、仍阻塞什么。
 ```
 
 ## Total-Control Poll / Resume Prompt Pattern
@@ -753,26 +842,30 @@ Only use this launch pattern after the project has recorded `LEVEL_3_FULL_PARALL
 
 先取得唯一写者 fence，核对当前 epoch、预期 control HEAD、各 product HEAD 与所有未完成 operation。external-git 下分别报告控制仓和产品仓，不得把跨仓更新描述为原子提交。
 
+从 topology 解析精确 `<roles_state_path>`、`<runs_state_path>`、`<task_registry_or_human_view_path>` 和 `<status_snapshot_path>`：embedded 默认位于 `<control_root>/.yefeng/state/**` 及项目本地人类视图；external-git 位于 `<control_root>/.yefeng/series/<scope_id>/state/**`、`<control_root>/docs/modules/<scope_id>/registry.md` 和 `<control_root>/docs/status.md`。不得把 embedded 路径写入 external 控制仓，也不得从相邻目录猜测。
+
 先强制执行已记录启动档位。LEVEL_1 只排空治理初始化动作；不得分配/启动角色、创建实现 worktree、启动 heartbeat 或 merge。LEVEL_2 仅允许总控单线程范围。
+
+再核对当前 outcome_lock_revision、用户可见证明、MVP/非目标、首个纵向切片、估时基线和偏移计数。默认批准只允许排空这些边界内的工作。若偏移熔断已触发，停止受影响范围的新派发/集成，整理一次批量决策；不要继续基础设施扩张，也不要逐文件索权。
 
 这是执行轮次，不是只读巡检。除非用户明确说 read-only/dry-run/no launch/do not start/resume/merge，否则检查后必须进入排空循环：执行当前已授权、未阻塞、容量允许的控制动作；每完成一项就重新计算队列并继续，直到没有可执行动作、容量被运行角色占满、需要用户决策，或出现明确阻塞。
 
 请执行：
 1. 处理已完成 run；
-2. 更新 roles.json、runs.json、docs/角色分配.md；
+2. 更新已解析的 `<roles_state_path>`、`<runs_state_path>` 和 `<task_registry_or_human_view_path>`；
 3. Level 3 control-spool 下验证 broker，按 tracked broker-sequence cursor 排空 runtime journal 并幂等提升到 tracked event/receipt/view；worktree-local 或 legacy transport 才直接导入 `.yefeng/outbox/*.json`；
 4. 判断 BLOCKED 角色的 resume_when 是否满足；
 5. 对 READY_TO_RESUME 角色，先更新其 worktree 基线，再从该 worktree 目录使用 session_id 恢复；
 6. 对 MERGE_READY 角色检查 reviewer/验证证据，排除 `.yefeng/assignment.json` 和 `.yefeng/outbox/**` 后集成；
 7. 集成后写 BASELINE_UPDATED 事件并唤醒受影响角色；
-8. 如果本轮没有更高优先级工作消耗当前循环，读取状态快照/任务登记中的下一步待执行队列，执行所有当前安全且容量允许的动作：分配、启动、恢复、集成，或写出具体阻塞；
+8. 如果本轮没有更高优先级工作消耗当前循环，读取状态快照/任务登记中的下一步待执行队列，执行所有当前安全、位于 outcome lock 内且容量允许的动作：分配、启动、恢复、集成，或写出具体阻塞/批量决策；
 9. 每次状态变化后重新进入步骤 1；刷新 docs/总控状态快照.md 时，只把仍未满足条件、容量不足、依赖运行中角色、需要 ASK 或因时间预算明确延后的项目留在队列中；
 10. 更新治理 JSON 时使用可重跑的属性更新方式；PowerShell 中不要假设 `ConvertFrom-Json` 后的对象能直接赋不存在的属性，必要时用 `[ordered]` hashtable 或 `Add-Member -Force`；
 11. 生成 Markdown 治理视图时，避免双引号 here-string 吃掉反引号或 `$()`；优先用单引号 here-string + `__PLACEHOLDER__` 替换，并读回检查没有 `__PLACEHOLDER__`、`$sessionId`、`$roleCommit`、`$(` 等残留；
 12. 将稳定治理事实以显式 allowlist 提交到控制仓：machine state、event/receipt、任务登记、角色分配、通信路由、指令、交接摘要和状态快照应形成同一稳定 snapshot；不得把未知 dirty 文件顺手提交；
 13. 分别运行 control repo 和每个 affected product repo 的 diff/status 检查。只有被刻意忽略的运行运输文件可忽略；不得用一个笼统 clean 结论替代双仓事实；
 14. 若没有任何可执行工作，报告 `IDLE_OK`，说明已检查 running roles、outbox、merge-ready、ready-to-resume、active directives、dirty governance；若已有当前档位授权的 heartbeat，则保持 active，否则报告 `not enabled by startup-level gate`；
-15. 汇报本轮实际执行的动作、仍阻塞的问题、提交/合并 commit、工作区是否干净、heartbeat 档位状态和下一次触发条件；不要只汇报“下一步应做 X”。如果 X 已被当前档位授权、未阻塞且容量允许，本轮必须执行 X；不要因为空闲而删除/暂停已有且获授权的 heartbeat。
+15. 按 PRODUCT_PATH_CLOSED / PRODUCT_PATH_ADVANCED / ENABLEMENT_ONLY / SPEC_ONLY / TEST_ONLY 分类汇报本轮成果，并分开列出用户可见进展、内部使能、估时/范围变化、仍阻塞的问题、提交/合并 commit、工作区是否干净、heartbeat 档位状态和下一次触发条件；不要只汇报“下一步应做 X”。如果 X 已被当前档位和 outcome lock 授权、未阻塞且容量允许，本轮必须执行 X；不要因为空闲而删除/暂停已有且获授权的 heartbeat。当前 outcome lock/项目策略未明确定义时，不得自行加入 P50、P80、置信区间、完成百分比或其他工作流的估时术语；证据不足时直接说明下一次可重新估时的边界。
 ```
 
 ### PowerShell Governance Update Notes

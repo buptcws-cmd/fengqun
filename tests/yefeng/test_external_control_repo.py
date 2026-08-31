@@ -213,6 +213,28 @@ class ExternalControlRepoIntegrationTests(unittest.TestCase):
         roles_state = self._read_json(roles_path)
         runs_state = self._read_json(runs_path)
         writer_id = control_state["writer_fence"]["writer_id"]
+        outcome_revision = "fixture-outcome-v1"
+        control_state["outcome_lock"].update(
+            {
+                "status": "CONFIRMED",
+                "revision": outcome_revision,
+                "user_objective": "Exercise an active governed recovery scope.",
+                "user_visible_proof": "A fenced writer takeover closes successfully.",
+                "first_vertical_slice": "Recover one expired writer lease.",
+                "mvp_scope": "The recovery takeover fixture only.",
+                "non_goals": "No production repository effects.",
+                "existing_capability_inventory": "Bootstrap and writer-fence helpers.",
+                "reuse_adapt_new_defer": "Reuse the existing recovery protocol.",
+                "approved_public_contract_families": "Test-only control contract.",
+                "authorization_ceiling": "Disposable fixture writes only.",
+                "auto_execution_boundary": "The temporary test repositories.",
+                "ask_boundary": "No external side effects.",
+                "estimate_baseline": "One recovery transition.",
+                "drift_thresholds": "Stop on any unexpected repository mutation.",
+                "approved_by": "test-fixture",
+                "approved_at": "2026-08-30T00:00:00.0000000+00:00",
+            }
+        )
         control_state["startup_level"] = "LEVEL_3_FULL_PARALLEL_YEFENG"
 
         integrator = roles_state["roles"][0]
@@ -229,6 +251,10 @@ class ExternalControlRepoIntegrationTests(unittest.TestCase):
                 "lease_expires_at": (
                     datetime.now(timezone.utc) + timedelta(hours=1)
                 ).isoformat(),
+                "outcome_lock_revision": outcome_revision,
+                "delivery_classification": "PRODUCT_PATH_ADVANCED",
+                "user_visible_proof": "A fenced writer takeover closes successfully.",
+                "immediate_product_consumer": "The recovery takeover assertion.",
                 "last_output": "Old writer still marked this role active.",
             }
         )
